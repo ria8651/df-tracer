@@ -103,7 +103,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
     let dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
     if (dist == 0.0) {
-        return vec4<f32>(0.4);
+        return vec4<f32>(0.1);
     }
 
     ray.pos = ray.pos + ray.dir * (dist + 0.0001);
@@ -114,10 +114,11 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     let t_step = voxel_size / (ray.dir * r_sign);
     let step = voxel_size * r_sign;
     let start_voxel = ceil(ray.pos * scale * r_sign) / scale * r_sign;
-    var t_max = (start_voxel - ray.pos) / ray.dir;
 
+    var t_max = (start_voxel - ray.pos) / ray.dir;
     var pos = ray.pos;
     var count = 0;
+    var normal = trunc(ray.pos * 1.0001);
     loop {
         let voxel_data = unpack_u8(look_up_pos(pos));
         if (voxel_data.w == u32(1)) {
@@ -128,22 +129,26 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
             if (t_max.x < t_max.z) {
                 t_max.x = t_max.x + t_step.x;
                 pos.x = pos.x + step.x;
+                normal = vec3<f32>(-r_sign.x, 0.0, 0.0);
             } else {
                 t_max.z = t_max.z + t_step.z;
                 pos.z = pos.z + step.z;
+                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
             }
         } else {
             if (t_max.y < t_max.z) {
                 t_max.y = t_max.y + t_step.y;
                 pos.y = pos.y + step.y;
+                normal = vec3<f32>(0.0, -r_sign.y, 0.0);
             } else {
                 t_max.z = t_max.z + t_step.z;
                 pos.z = pos.z + step.z;
+                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
             }
         }
 
         if (!in_bounds(pos)) {
-            return vec4<f32>(0.4);
+            return vec4<f32>(0.1);
         }
 
         count = count + 1;
@@ -158,9 +163,12 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
         f32(voxel_data.r) / 255.0,
         f32(voxel_data.g) / 255.0,
         f32(voxel_data.b) / 255.0
-    );
+    ) * 256.0 / f32(u.cube_size);
+
+    let shade = max(clamp(dot(normal, vec3<f32>(0.1, 1.0, 0.3)), 0.0, 1.0), 0.3);
+    let shaded = clamp(shade, 0.0, 1.0) * voxel_colour;
     
-    output_colour = vec4<f32>(voxel_colour * 256.0 / f32(u.cube_size), 1.0);
+    output_colour = vec4<f32>(shaded, 1.0);
     return pow(clamp(output_colour, vec4<f32>(0.0), vec4<f32>(1.0)), vec4<f32>(2.2, 2.2, 2.2, 1.0));
 }
 

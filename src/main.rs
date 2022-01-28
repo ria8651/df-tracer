@@ -10,8 +10,7 @@ use std::time::Instant;
 
 fn main() {
     // Load voxels
-    let cube_size = 128;
-    let voxels = get_voxels(cube_size, 0);
+    let (cube_size, voxels) = get_voxels();
     
     env_logger::init();
     let event_loop = EventLoop::new();
@@ -305,7 +304,7 @@ impl State {
             self.input.right as u32 as f32 - self.input.left as u32 as f32,
             self.input.up as u32 as f32 - self.input.down as u32 as f32,
             self.input.forward as u32 as f32 - self.input.backward as u32 as f32,
-        ) * 0.1;
+        ) * 0.01;
 
         let forward: Vector3<f32> = -self.character.pos.to_vec().normalize();
         let right = forward.cross(Vector3::new(0.0, 1.0, 0.0)).normalize();
@@ -334,12 +333,13 @@ impl State {
             bytemuck::cast_slice(&[self.uniforms]),
         );
 
-        let voxels = get_voxels(128, (time * 60.0) as u32);
-        self.queue.write_buffer(
-            &self.storage_buffer,
-            0,
-            bytemuck::cast_slice(&voxels),
-        );
+        // Animation
+        // let voxels = get_voxels(128, (time * 60.0) as u32);
+        // self.queue.write_buffer(
+        //     &self.storage_buffer,
+        //     0,
+        //     bytemuck::cast_slice(&voxels),
+        // );
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -443,8 +443,9 @@ impl Character {
     }
 }
 
-fn get_voxels(cube_size: u32, offset: u32) -> Vec<u32> {
+fn get_voxels() -> (u32, Vec<u32>) {
     let mut voxels = Vec::new();
+    let cube_size = 128;
     for x in 0..cube_size {
         for y in 0..cube_size {
             for z in 0..cube_size {
@@ -452,10 +453,10 @@ fn get_voxels(cube_size: u32, offset: u32) -> Vec<u32> {
                     x as u8,
                     y as u8,
                     z as u8,
-                    ((x + y + z + offset) % 64) as u8,
+                    ((x + y + z) % 2) as u8,
                 ]));
             }
         }
     }
-    voxels
+    (cube_size, voxels)
 }
