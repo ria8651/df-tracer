@@ -76,6 +76,20 @@ fn look_up_pos(pos: vec3<f32>) -> u32 {
     return d.data[index];
 }
 
+fn unpack_u8(p: u32) -> vec4<u32> {
+    return vec4<u32>(
+        (p >> u32(24)) & u32(255),
+        (p >> u32(16)) & u32(255),
+        (p >> u32(8)) & u32(255),
+        p & u32(255)
+    );
+}
+
+fn in_bounds(v: vec3<f32>) -> bool {
+    let s = step(vec3<f32>(-1.0), v) - step(vec3<f32>(1.0), v);
+    return (s.x * s.y * s.z) > 0.5; 
+}
+
 [[stage(fragment)]]
 fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     var output_colour = vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -105,6 +119,11 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     var pos = ray.pos;
     var count = 0;
     loop {
+        let voxel_data = unpack_u8(look_up_pos(pos));
+        if (voxel_data.w == u32(1)) {
+            break;
+        }
+
         if (t_max.x < t_max.y) {
             if (t_max.x < t_max.z) {
                 t_max.x = t_max.x + t_step.x;
@@ -123,16 +142,25 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
             }
         }
 
+        if (!in_bounds(pos)) {
+            return vec4<f32>(0.4);
+        }
+
         count = count + 1;
 
-        if (count > 0) {
+        if (count > 500) {
             break;
         }
     }
 
-    let v = f32(look_up_pos(pos)) / 16.0;
+    let voxel_data = unpack_u8(look_up_pos(pos));
+    let voxel_colour = vec3<f32>(
+        f32(voxel_data.r) / 255.0,
+        f32(voxel_data.g) / 255.0,
+        f32(voxel_data.b) / 255.0
+    );
     
-    output_colour = vec4<f32>(v, v, v, 1.0);
+    output_colour = vec4<f32>(voxel_colour * 256.0 / f32(u.cube_size), 1.0);
     return pow(clamp(output_colour, vec4<f32>(0.0), vec4<f32>(1.0)), vec4<f32>(2.2, 2.2, 2.2, 1.0));
 }
 

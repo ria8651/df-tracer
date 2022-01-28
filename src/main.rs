@@ -98,7 +98,10 @@ impl State {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     features: wgpu::Features::empty(),
-                    limits: wgpu::Limits::default(),
+                    limits: wgpu::Limits {
+                        max_storage_buffer_binding_size: 1024000000,
+                        ..Default::default()
+                    },
                     label: None,
                 },
                 None, // Trace path
@@ -124,7 +127,7 @@ impl State {
         });
 
         // #region Buffers
-        let cube_size = 32;
+        let cube_size = 128;
 
         let uniforms = Uniforms::new(cube_size);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -137,7 +140,12 @@ impl State {
         for x in 0..cube_size {
             for y in 0..cube_size {
                 for z in 0..cube_size {
-                    data.push((x + y + z) % 16);
+                    data.push(u32::from_be_bytes([
+                        x as u8,
+                        y as u8,
+                        z as u8,
+                        ((x + y + z) % 64) as u8,
+                    ]));
                 }
             }
         }
