@@ -73,7 +73,7 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     uniforms: Uniforms,
     uniform_buffer: wgpu::Buffer,
-    uniform_bind_group: wgpu::BindGroup,
+    main_bind_group: wgpu::BindGroup,
     input: Input,
     character: Character,
 }
@@ -81,23 +81,6 @@ struct State {
 impl State {
     // Creating some of the wgpu types requires async code
     async fn new(window: &Window) -> Self {
-        let size = window.inner_size();
-
-        // The instance is a handle to our GPU
-        // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let surface = unsafe { instance.create_surface(window) };
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .unwrap();
-
-        let size = window.inner_size();
-
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::all());
@@ -123,6 +106,9 @@ impl State {
             .await
             .unwrap();
 
+        // println!("Info: {:?}", device.limits().max_storage_buffer_binding_size);
+
+        let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface.get_preferred_format(&adapter).unwrap(),
@@ -138,34 +124,70 @@ impl State {
         });
 
         // #region Buffers
-        let uniforms = Uniforms::new();
+        let cube_size = 32;
+
+        let uniforms = Uniforms::new(cube_size);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let uniform_bind_group_layout =
+        let mut data = Vec::new();
+        for x in 0..cube_size {
+            for y in 0..cube_size {
+                for z in 0..cube_size {
+                    data.push((x + y + z) % 16);
+                }
+            }
+        }
+        let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Storage Buffer"),
+            contents: bytemuck::cast_slice(&data),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        });
+
+        let main_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+                label: Some("main_bind_group_layout"),
             });
 
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+        let main_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &main_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: storage_buffer.as_entire_binding(),
+                },
+            ],
             label: Some("uniform_bind_group"),
         });
         // #endregion
@@ -173,7 +195,7 @@ impl State {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&uniform_bind_group_layout],
+                bind_group_layouts: &[&main_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -224,7 +246,7 @@ impl State {
             render_pipeline,
             uniforms,
             uniform_buffer,
-            uniform_bind_group,
+            main_bind_group,
             input,
             character,
         }
@@ -284,7 +306,7 @@ impl State {
             self.input.forward as u32 as f32 - self.input.backward as u32 as f32,
         ) * 0.1;
 
-        let forward: Vector3::<f32> = -self.character.pos.to_vec().normalize();
+        let forward: Vector3<f32> = -self.character.pos.to_vec().normalize();
         let right = forward.cross(Vector3::new(0.0, 1.0, 0.0)).normalize();
         let up = right.cross(forward);
 
@@ -345,7 +367,7 @@ impl State {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.main_bind_group, &[]);
             render_pass.draw(0..4, 0..1);
         }
 
@@ -385,14 +407,18 @@ struct Uniforms {
     camera: [[f32; 4]; 4],
     camera_inverse: [[f32; 4]; 4],
     dimensions: [f32; 4],
+    cube_size: u32,
+    junk: [u32; 3],
 }
 
 impl Uniforms {
-    fn new() -> Self {
+    fn new(cube_size: u32) -> Self {
         Self {
             camera: [[0.0; 4]; 4],
             camera_inverse: [[0.0; 4]; 4],
             dimensions: [0.0, 0.0, 0.0, 0.0],
+            cube_size,
+            junk: [0; 3],
         }
     }
 }

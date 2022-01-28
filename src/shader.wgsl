@@ -2,10 +2,18 @@ struct Uniforms {
     camera: mat4x4<f32>;
     camera_inverse: mat4x4<f32>;
     dimensions: vec4<f32>;
+    cube_size: u32;
 };
 
 [[group(0), binding(0)]]
 var<uniform> u: Uniforms;
+
+struct Data {
+    data: [[stride(4)]] array<u32>;
+};
+
+[[group(0), binding(1)]]
+var<storage, read_write> d: Data;
 
 [[stage(vertex)]]
 fn vs_main([[builtin(vertex_index)]] in_vertex_index: u32) -> [[builtin(position)]] vec4<f32> {
@@ -61,17 +69,72 @@ struct FSIn {
     [[builtin(position)]] frag_pos: vec4<f32>;
 };
 
+fn look_up_pos(pos: vec3<f32>) -> u32 {
+    let pos = vec3<u32>((pos * 0.5 + 0.5) * f32(u.cube_size));
+
+    let index = pos.x * u.cube_size * u.cube_size + pos.y * u.cube_size + pos.z;
+    return d.data[index];
+}
+
 [[stage(fragment)]]
 fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
+    var output_colour = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     let clip_space = get_clip_space(in.frag_pos, u.dimensions.xy);
 
     let pos = u.camera_inverse * vec4<f32>(clip_space.x, clip_space.y, 0.0, 1.0);
     let dir = u.camera_inverse * vec4<f32>(clip_space.x, clip_space.y, 1.0, 1.0);
     let pos = pos.xyz / pos.w;
     let dir = normalize(dir.xyz / dir.w - pos);
-    let ray = Ray(pos.xyz, dir.xyz);
+    var ray = Ray(pos.xyz, dir.xyz);
 
-    let v = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
+    let dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
+    if (dist == 0.0) {
+        return vec4<f32>(0.4);
+    }
 
-    return vec4<f32>(v, v, v, 1.0);
+    ray.pos = ray.pos + ray.dir * (dist + 0.0001);
+
+    let r_sign = sign(ray.dir);
+    let scale = f32(u.cube_size) / 2.0;
+    let voxel_size = 2.0 / f32(u.cube_size);
+    let t_step = voxel_size / (ray.dir * r_sign);
+    let step = voxel_size * r_sign;
+    let start_voxel = ceil(ray.pos * scale * r_sign) / scale * r_sign;
+    var t_max = (start_voxel - ray.pos) / ray.dir;
+
+    var pos = ray.pos;
+    var count = 0;
+    loop {
+        if (t_max.x < t_max.y) {
+            if (t_max.x < t_max.z) {
+                t_max.x = t_max.x + t_step.x;
+                pos.x = pos.x + step.x;
+            } else {
+                t_max.z = t_max.z + t_step.z;
+                pos.z = pos.z + step.z;
+            }
+        } else {
+            if (t_max.y < t_max.z) {
+                t_max.y = t_max.y + t_step.y;
+                pos.y = pos.y + step.y;
+            } else {
+                t_max.z = t_max.z + t_step.z;
+                pos.z = pos.z + step.z;
+            }
+        }
+
+        count = count + 1;
+
+        if (count > 0) {
+            break;
+        }
+    }
+
+    let v = f32(look_up_pos(pos)) / 16.0;
+    
+    output_colour = vec4<f32>(v, v, v, 1.0);
+    return pow(clamp(output_colour, vec4<f32>(0.0), vec4<f32>(1.0)), vec4<f32>(2.2, 2.2, 2.2, 1.0));
 }
+
+// let cube_pos = floor(ray.pos * side_length) / side_length;
+// (cube_pos - ray.pos + r_sign * 2.0 / f32(u.cube_size));
