@@ -90,6 +90,83 @@ fn in_bounds(v: vec3<f32>) -> bool {
     return (s.x * s.y * s.z) > 0.5; 
 }
 
+struct Hit {
+    hit: bool;
+    pos: vec3<f32>;
+    colour: vec3<f32>;
+    normal: vec3<f32>;
+};
+
+fn sdf_ray(ray: Ray) -> Hit {
+    let dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
+    if (dist == 0.0) {
+        return Hit(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    }
+
+    let pos = ray.pos + ray.dir * (dist + 0.0001);
+
+    let r_sign = sign(ray.dir);
+    let scale = f32(u.cube_size) / 2.0;
+    let voxel_size = 2.0 / f32(u.cube_size);
+    let t_step = voxel_size / (ray.dir * r_sign);
+    let step = voxel_size * r_sign;
+    let start_voxel = ceil(pos * scale * r_sign) / scale * r_sign;
+
+    var t_max = (start_voxel - pos) / ray.dir;
+    var t_current = 0.0;
+    var count = 0;
+    var normal = trunc(pos * 1.0001);
+    loop {
+        let voxel_data = unpack_u8(look_up_pos(pos + ray.dir * t_current));
+        if (voxel_data.w != u32(0)) {
+            break;
+        }
+
+        if (t_max.x < t_max.y) {
+            if (t_max.x < t_max.z) {
+                t_current = t_current + t_max.x;
+                t_max.x = t_max.x + t_step.x;
+                normal = vec3<f32>(-r_sign.x, 0.0, 0.0);
+            } else {
+                t_current = t_current + t_max.z;
+                t_max.z = t_max.z + t_step.z;
+                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
+            }
+        } else {
+            if (t_max.y < t_max.z) {
+                t_current = t_current + t_max.y;
+                t_max.y = t_max.y + t_step.y;
+                normal = vec3<f32>(0.0, -r_sign.y, 0.0);
+            } else {
+                t_current = t_current + t_max.z;
+                t_max.z = t_max.z + t_step.z;
+                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
+            }
+        }
+
+        if (!in_bounds(pos + ray.dir * t_current)) {
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+        }
+
+        count = count + 1;
+
+        if (count > 500) {
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+        }
+    }
+
+    let hit_pos = pos + ray.dir * t_current;
+
+    let voxel_data = unpack_u8(look_up_pos(hit_pos));
+    let voxel_colour = vec3<f32>(
+        f32(voxel_data.x),
+        f32(voxel_data.y),
+        f32(voxel_data.z)
+    ) / 255.0;
+
+    return Hit(true, hit_pos, voxel_colour, normal);
+}
+
 [[stage(fragment)]]
 fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     var output_colour = vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -101,74 +178,27 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     let dir = normalize(dir.xyz / dir.w - pos);
     var ray = Ray(pos.xyz, dir.xyz);
 
-    let dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
-    if (dist == 0.0) {
-        return vec4<f32>(0.1);
+    let hit = sdf_ray(ray);
+    if (hit.hit) {
+        let sun_dir = vec3<f32>(0.6, 1.0, -0.4);
+
+        let shadow_hit = sdf_ray(Ray(hit.pos, -sun_dir));
+
+        output_colour = vec4<f32>(hit.pos, 1.0);
+
+        // var shade = 0.0;
+        // if (shadow_hit.hit) {
+        //     output_colour = vec4<f32>(shadow_hit.pos, 1.0);
+        // } else {
+        //     shade = max(clamp(dot(hit.normal, normalize(sun_dir)), 0.0, 1.0), 0.3);
+        // }
+
+        // let shaded = clamp(shade, 0.0, 1.0) * hit.colour;
+        // output_colour = vec4<f32>(shaded, 1.0);
+    } else {
+        output_colour = vec4<f32>(1.0);
     }
-
-    ray.pos = ray.pos + ray.dir * (dist + 0.0001);
-
-    let r_sign = sign(ray.dir);
-    let scale = f32(u.cube_size) / 2.0;
-    let voxel_size = 2.0 / f32(u.cube_size);
-    let t_step = voxel_size / (ray.dir * r_sign);
-    let step = voxel_size * r_sign;
-    let start_voxel = ceil(ray.pos * scale * r_sign) / scale * r_sign;
-
-    var t_max = (start_voxel - ray.pos) / ray.dir;
-    var pos = ray.pos;
-    var count = 0;
-    var normal = trunc(ray.pos * 1.0001);
-    loop {
-        let voxel_data = unpack_u8(look_up_pos(pos));
-        if (voxel_data.w != u32(0)) {
-            break;
-        }
-
-        if (t_max.x < t_max.y) {
-            if (t_max.x < t_max.z) {
-                t_max.x = t_max.x + t_step.x;
-                pos.x = pos.x + step.x;
-                normal = vec3<f32>(-r_sign.x, 0.0, 0.0);
-            } else {
-                t_max.z = t_max.z + t_step.z;
-                pos.z = pos.z + step.z;
-                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
-            }
-        } else {
-            if (t_max.y < t_max.z) {
-                t_max.y = t_max.y + t_step.y;
-                pos.y = pos.y + step.y;
-                normal = vec3<f32>(0.0, -r_sign.y, 0.0);
-            } else {
-                t_max.z = t_max.z + t_step.z;
-                pos.z = pos.z + step.z;
-                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
-            }
-        }
-
-        if (!in_bounds(pos)) {
-            return vec4<f32>(0.1);
-        }
-
-        count = count + 1;
-
-        if (count > 500) {
-            break;
-        }
-    }
-
-    let voxel_data = unpack_u8(look_up_pos(pos));
-    let voxel_colour = vec3<f32>(
-        f32(voxel_data.x),
-        f32(voxel_data.y),
-        f32(voxel_data.z)
-    ) / 255.0;
-
-    let shade = max(clamp(dot(normal, normalize(vec3<f32>(0.6, 1.0, -0.4))), 0.0, 1.0), 0.3);
-    let shaded = clamp(shade, 0.0, 1.0) * voxel_colour;
     
-    output_colour = vec4<f32>(shaded, 1.0);
     return pow(clamp(output_colour, vec4<f32>(0.0), vec4<f32>(1.0)), vec4<f32>(2.2, 2.2, 2.2, 1.0));
 }
 
