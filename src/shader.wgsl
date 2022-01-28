@@ -121,7 +121,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     var normal = trunc(ray.pos * 1.0001);
     loop {
         let voxel_data = unpack_u8(look_up_pos(pos));
-        if (voxel_data.w == u32(1)) {
+        if (voxel_data.w != u32(0)) {
             break;
         }
 
@@ -160,12 +160,12 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
     let voxel_data = unpack_u8(look_up_pos(pos));
     let voxel_colour = vec3<f32>(
-        f32(voxel_data.r) / 255.0,
-        f32(voxel_data.g) / 255.0,
-        f32(voxel_data.b) / 255.0
-    ) * 256.0 / f32(u.cube_size);
+        f32(voxel_data.x),
+        f32(voxel_data.y),
+        f32(voxel_data.z)
+    ) / 255.0;
 
-    let shade = max(clamp(dot(normal, vec3<f32>(0.1, 1.0, 0.3)), 0.0, 1.0), 0.3);
+    let shade = max(clamp(dot(normal, normalize(vec3<f32>(0.6, 1.0, -0.4))), 0.0, 1.0), 0.3);
     let shaded = clamp(shade, 0.0, 1.0) * voxel_colour;
     
     output_colour = vec4<f32>(shaded, 1.0);

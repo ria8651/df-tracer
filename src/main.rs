@@ -1,17 +1,16 @@
 use cgmath::prelude::*;
 use cgmath::{perspective, Deg, Matrix4, Point3, Vector3};
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-use std::time::Instant;
 
 fn main() {
     // Load voxels
     let (cube_size, voxels) = get_voxels();
-    
     env_logger::init();
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
@@ -444,19 +443,31 @@ impl Character {
 }
 
 fn get_voxels() -> (u32, Vec<u32>) {
+    let vox_data = dot_vox::load("vox/monu10.vox").unwrap();
+    let size = vox_data.models[0].size;
+    if size.x != size.y || size.x != size.z || size.y != size.z {
+        panic!("Voxel model is not a cube");
+    }
+
+    let size = size.x as usize;
+
     let mut voxels = Vec::new();
-    let cube_size = 128;
-    for x in 0..cube_size {
-        for y in 0..cube_size {
-            for z in 0..cube_size {
-                voxels.push(u32::from_be_bytes([
-                    x as u8,
-                    y as u8,
-                    z as u8,
-                    ((x + y + z) % 2) as u8,
-                ]));
+    for _ in 0..size {
+        for _ in 0..size {
+            for _ in 0..size {
+                voxels.push(u32::from_be_bytes([0, 0, 0, 0]));
             }
         }
     }
-    (cube_size, voxels)
+
+    for voxel in &vox_data.models[0].voxels {
+        let colour = vox_data.palette[voxel.i as usize].to_le_bytes();
+        voxels[
+            voxel.x as usize * size * size + // x
+            voxel.z as usize * size +        // z
+            voxel.y as usize                 // y
+        ] = u32::from_be_bytes([colour[0], colour[1], colour[2], 1]);
+    }
+
+    (size as u32, voxels)
 }
