@@ -6,19 +6,25 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+use std::time::Instant;
 
 fn main() {
+    // Load voxels
+    let cube_size = 128;
+    let voxels = get_voxels(cube_size, 0);
+    
     env_logger::init();
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(State::new(&window));
+    let mut state = pollster::block_on(State::new(&window, &voxels, cube_size));
 
+    let now = Instant::now();
     event_loop.run(move |event, _, control_flow| {
         state.input(&event);
         match event {
             Event::RedrawRequested(window_id) if window_id == window.id() => {
-                state.update();
+                state.update(now.elapsed().as_secs_f32());
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
@@ -73,6 +79,7 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     uniforms: Uniforms,
     uniform_buffer: wgpu::Buffer,
+    storage_buffer: wgpu::Buffer,
     main_bind_group: wgpu::BindGroup,
     input: Input,
     character: Character,
@@ -80,7 +87,7 @@ struct State {
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: &Window) -> Self {
+    async fn new(window: &Window, voxels: &[u32], cube_size: u32) -> Self {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::all());
@@ -127,8 +134,6 @@ impl State {
         });
 
         // #region Buffers
-        let cube_size = 128;
-
         let uniforms = Uniforms::new(cube_size);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -136,22 +141,9 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let mut data = Vec::new();
-        for x in 0..cube_size {
-            for y in 0..cube_size {
-                for z in 0..cube_size {
-                    data.push(u32::from_be_bytes([
-                        x as u8,
-                        y as u8,
-                        z as u8,
-                        ((x + y + z) % 64) as u8,
-                    ]));
-                }
-            }
-        }
         let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Storage Buffer"),
-            contents: bytemuck::cast_slice(&data),
+            contents: bytemuck::cast_slice(voxels),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -254,6 +246,7 @@ impl State {
             render_pipeline,
             uniforms,
             uniform_buffer,
+            storage_buffer,
             main_bind_group,
             input,
             character,
@@ -307,7 +300,7 @@ impl State {
         }
     }
 
-    fn update(&mut self) {
+    fn update(&mut self, time: f32) {
         let input = Vector3::new(
             self.input.right as u32 as f32 - self.input.left as u32 as f32,
             self.input.up as u32 as f32 - self.input.down as u32 as f32,
@@ -339,6 +332,13 @@ impl State {
             &self.uniform_buffer,
             0,
             bytemuck::cast_slice(&[self.uniforms]),
+        );
+
+        let voxels = get_voxels(128, (time * 60.0) as u32);
+        self.queue.write_buffer(
+            &self.storage_buffer,
+            0,
+            bytemuck::cast_slice(&voxels),
         );
     }
 
@@ -441,4 +441,21 @@ impl Character {
             pos: Point3::new(0.0, 0.0, -1.5),
         }
     }
+}
+
+fn get_voxels(cube_size: u32, offset: u32) -> Vec<u32> {
+    let mut voxels = Vec::new();
+    for x in 0..cube_size {
+        for y in 0..cube_size {
+            for z in 0..cube_size {
+                voxels.push(u32::from_be_bytes([
+                    x as u8,
+                    y as u8,
+                    z as u8,
+                    ((x + y + z + offset) % 64) as u8,
+                ]));
+            }
+        }
+    }
+    voxels
 }

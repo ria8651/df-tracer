@@ -12,3 +12,4 @@ cgmath = "0.18"
 pollster = "0.2"
 env_logger = "0.9"
 bytemuck = { version = "1.7", features = [ "derive" ] }
+dot_vox = "4.1.0"
