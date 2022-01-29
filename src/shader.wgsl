@@ -98,12 +98,15 @@ struct Hit {
 };
 
 fn sdf_ray(ray: Ray) -> Hit {
-    let dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
-    if (dist == 0.0) {
-        return Hit(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    var dist = 0.0;
+    if (!in_bounds(ray.pos)) {
+        dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
+        if (dist == 0.0) {
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
+        }
     }
 
-    let pos = ray.pos + ray.dir * (dist + 0.0001);
+    let pos = ray.pos + ray.dir * dist;
 
     let r_sign = sign(ray.dir);
     let scale = f32(u.cube_size) / 2.0;
@@ -116,55 +119,55 @@ fn sdf_ray(ray: Ray) -> Hit {
     var t_current = 0.0;
     var count = 0;
     var normal = trunc(pos * 1.0001);
+    var voxel_pos = pos + ray.dir * t_current - normal * 0.001;
     loop {
-        let voxel_data = unpack_u8(look_up_pos(pos + ray.dir * t_current));
+        let voxel_data = unpack_u8(look_up_pos(voxel_pos));
         if (voxel_data.w != u32(0)) {
             break;
         }
 
         if (t_max.x < t_max.y) {
             if (t_max.x < t_max.z) {
-                t_current = t_current + t_max.x;
+                t_current = t_max.x;
                 t_max.x = t_max.x + t_step.x;
                 normal = vec3<f32>(-r_sign.x, 0.0, 0.0);
             } else {
-                t_current = t_current + t_max.z;
+                t_current = t_max.z;
                 t_max.z = t_max.z + t_step.z;
                 normal = vec3<f32>(0.0, 0.0, -r_sign.z);
             }
         } else {
             if (t_max.y < t_max.z) {
-                t_current = t_current + t_max.y;
+                t_current = t_max.y;
                 t_max.y = t_max.y + t_step.y;
                 normal = vec3<f32>(0.0, -r_sign.y, 0.0);
             } else {
-                t_current = t_current + t_max.z;
+                t_current = t_max.z;
                 t_max.z = t_max.z + t_step.z;
                 normal = vec3<f32>(0.0, 0.0, -r_sign.z);
             }
         }
 
-        if (!in_bounds(pos + ray.dir * t_current)) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+        voxel_pos = pos + ray.dir * t_current - normal * 0.001;
+
+        if (!in_bounds(voxel_pos)) {
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0));
         }
 
         count = count + 1;
-
         if (count > 500) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0));
         }
     }
 
-    let hit_pos = pos + ray.dir * t_current;
-
-    let voxel_data = unpack_u8(look_up_pos(hit_pos));
+    let voxel_data = unpack_u8(look_up_pos(voxel_pos));
     let voxel_colour = vec3<f32>(
         f32(voxel_data.x),
         f32(voxel_data.y),
         f32(voxel_data.z)
     ) / 255.0;
 
-    return Hit(true, hit_pos, voxel_colour, normal);
+    return Hit(true, voxel_pos, voxel_colour, normal);
 }
 
 [[stage(fragment)]]
@@ -182,19 +185,17 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     if (hit.hit) {
         let sun_dir = vec3<f32>(0.6, 1.0, -0.4);
 
-        let shadow_hit = sdf_ray(Ray(hit.pos, -sun_dir));
+        let shadow_hit = sdf_ray(Ray(hit.pos + hit.normal * 0.0156, sun_dir));
 
-        output_colour = vec4<f32>(hit.pos, 1.0);
+        var shade = 0.0;
+        if (shadow_hit.hit) {
+            shade = 0.3;
+        } else {
+            shade = max(clamp(dot(hit.normal, normalize(sun_dir)), 0.0, 1.0), 0.3);
+        }
 
-        // var shade = 0.0;
-        // if (shadow_hit.hit) {
-        //     output_colour = vec4<f32>(shadow_hit.pos, 1.0);
-        // } else {
-        //     shade = max(clamp(dot(hit.normal, normalize(sun_dir)), 0.0, 1.0), 0.3);
-        // }
-
-        // let shaded = clamp(shade, 0.0, 1.0) * hit.colour;
-        // output_colour = vec4<f32>(shaded, 1.0);
+        let shaded = clamp(shade, 0.0, 1.0) * hit.colour;
+        output_colour = vec4<f32>(shaded, 1.0);
     } else {
         output_colour = vec4<f32>(1.0);
     }

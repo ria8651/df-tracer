@@ -443,7 +443,7 @@ impl Character {
 }
 
 fn get_voxels() -> (u32, Vec<u32>) {
-    let vox_data = dot_vox::load("vox/monu10.vox").unwrap();
+    let vox_data = dot_vox::load("vox/monu9.vox").unwrap();
     let size = vox_data.models[0].size;
     if size.x != size.y || size.x != size.z || size.y != size.z {
         panic!("Voxel model is not a cube");
