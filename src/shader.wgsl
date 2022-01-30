@@ -172,7 +172,7 @@ fn sdf_ray(ray: Ray) -> Hit {
 
 [[stage(fragment)]]
 fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
-    var output_colour = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    var output_colour = vec3<f32>(0.0, 0.0, 0.0);
     let clip_space = get_clip_space(in.frag_pos, u.dimensions.xy);
 
     let pos = u.camera_inverse * vec4<f32>(clip_space.x, clip_space.y, 0.0, 1.0);
@@ -183,25 +183,25 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
     let hit = sdf_ray(ray);
     if (hit.hit) {
-        let sun_dir = vec3<f32>(0.6, 1.0, -0.4);
+        let sun_dir = normalize(vec3<f32>(-0.6, -1.0, 0.4));
 
-        let shadow_hit = sdf_ray(Ray(hit.pos + hit.normal * 0.0156, sun_dir));
+        let ambient = 0.3;
+        var diffuse = max(dot(hit.normal, -sun_dir), 0.0);
 
-        var shade = 0.0;
-        if (shadow_hit.hit) {
-            shade = 0.3;
-        } else {
-            shade = max(clamp(dot(hit.normal, normalize(sun_dir)), 0.0, 1.0), 0.3);
+        var v = 0.0;
+        let s = 1;
+        for (var i: i32 = 0; i < s; i = i + 1) {
+            let shadow_hit = sdf_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir));
+            if (!shadow_hit.hit) {
+                v = v + 1.0 / f32(s);
+            }
         }
+        diffuse = diffuse * v;
 
-        let shaded = clamp(shade, 0.0, 1.0) * hit.colour;
-        output_colour = vec4<f32>(shaded, 1.0);
+        output_colour = (ambient + diffuse) * hit.colour;
     } else {
-        output_colour = vec4<f32>(1.0);
+        output_colour = vec3<f32>(0.5, 0.8, 0.92);
     }
     
-    return pow(clamp(output_colour, vec4<f32>(0.0), vec4<f32>(1.0)), vec4<f32>(2.2, 2.2, 2.2, 1.0));
+    return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 1.0);
 }
-
-// let cube_pos = floor(ray.pos * side_length) / side_length;
-// (cube_pos - ray.pos + r_sign * 2.0 / f32(u.cube_size));

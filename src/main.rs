@@ -128,7 +128,9 @@ impl State {
 
         let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                (concat!(include_str!("common.wgsl"), include_str!("shader.wgsl"))).into(),
+            ),
         });
 
         // #region Buffers
@@ -318,7 +320,7 @@ impl State {
             Point3::new(0.0, 0.0, 0.0),
             Vector3::unit_y(),
         );
-        let proj = perspective(Deg(90.0), dimensions[0] / dimensions[1], 0.01, 100.0);
+        let proj = perspective(Deg(90.0), dimensions[0] / dimensions[1], 0.001, 1.0);
         let camera = proj * view;
         let camera_inverse = camera.invert().unwrap();
 
@@ -443,7 +445,7 @@ impl Character {
 }
 
 fn get_voxels() -> (u32, Vec<u32>) {
-    let vox_data = dot_vox::load("vox/monu9.vox").unwrap();
+    let vox_data = dot_vox::load("vox/treehouse.vox").unwrap();
     let size = vox_data.models[0].size;
     if size.x != size.y || size.x != size.z || size.y != size.z {
         panic!("Voxel model is not a cube");
