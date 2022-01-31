@@ -8,15 +8,22 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+struct Sdf(u32, Vec<u32>);
+
 fn main() {
-    // Load voxels
-    let (cube_size, voxels) = get_voxels();
+    // Defualt file path that only works on the terminal
+    let path = std::path::PathBuf::from("vox/treehouse.vox");
+
+    let mut sdf = None;
+    if let Ok(output) = get_voxels(path) {
+        sdf = Some(output);
+    }
 
     env_logger::init();
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(State::new(&window, &voxels, cube_size));
+    let mut state = pollster::block_on(State::new(&window, sdf));
 
     let now = Instant::now();
     event_loop.run(move |event, _, control_flow| {
@@ -86,11 +93,12 @@ struct State {
     previous_frame_time: Option<f64>,
     egui_platform: egui_winit_platform::Platform,
     egui_rpass: egui_wgpu_backend::RenderPass,
+    error_string: String,
 }
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: &Window, voxels: &[u32], cube_size: u32) -> Self {
+    async fn new(window: &Window, sdf: Option<Sdf>) -> Self {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::all());
@@ -139,7 +147,10 @@ impl State {
         });
 
         // #region Buffers
-        let uniforms = Uniforms::new(cube_size);
+        // 4278190081 is solid red and 16777216 is 256x256x256
+        let sdf = sdf.unwrap_or(Sdf(1, vec![4278190081; 16777216]));
+
+        let uniforms = Uniforms::new(sdf.0);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
@@ -147,8 +158,8 @@ impl State {
         });
 
         let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Storage Buffer"),
-            contents: bytemuck::cast_slice(voxels),
+            label: Some("SDF Buffer"),
+            contents: bytemuck::cast_slice(&sdf.1),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -258,6 +269,8 @@ impl State {
 
         let previous_frame_time = None;
 
+        let error_string = "".to_string();
+
         Self {
             surface,
             device,
@@ -274,6 +287,7 @@ impl State {
             previous_frame_time,
             egui_platform,
             egui_rpass,
+            error_string,
         }
     }
 
@@ -352,12 +366,6 @@ impl State {
         self.uniforms.camera = camera.into();
         self.uniforms.camera_inverse = camera_inverse.into();
 
-        self.queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&[self.uniforms]),
-        );
-
         let fps = if let Some(previous_frame_time) = self.previous_frame_time {
             let fps = 1.0 / (time - previous_frame_time);
             self.previous_frame_time = Some(time);
@@ -366,16 +374,44 @@ impl State {
             self.previous_frame_time = Some(time);
             0.0
         };
-        egui::Window::new("File editor").show(&self.egui_platform.context(), |ui| {
+        egui::Window::new("Info").show(&self.egui_platform.context(), |ui| {
             ui.label(format!("FPS: {:.0}", fps));
+            if ui.button("Open File").clicked() {
+                let path = native_dialog::FileDialog::new()
+                    .set_location("~/Desktop")
+                    .add_filter("Magica Voxel VOX File", &["vox"])
+                    .show_open_single_file()
+                    .unwrap();
+
+                match path {
+                    Some(path) => match get_voxels(path) {
+                        Ok(sdf) => {
+                            self.uniforms.cube_size = sdf.0;
+                            self.queue.write_buffer(
+                                &self.storage_buffer,
+                                0,
+                                bytemuck::cast_slice(&sdf.1),
+                            );
+                        }
+                        Err(error) => {
+                            self.error_string = error;
+                        }
+                    },
+                    None => self.error_string = "No file selected".to_string(),
+                }
+            }
+            ui.colored_label(
+                egui::color::Color32::from_rgb(255, 22, 22),
+                self.error_string.clone(),
+            );
         });
-        // Animation
-        // let voxels = get_voxels(128, (time * 60.0) as u32);
-        // self.queue.write_buffer(
-        //     &self.storage_buffer,
-        //     0,
-        //     bytemuck::cast_slice(&voxels),
-        // );
+
+        self.queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.uniforms]),
+        );
+
         self.egui_platform.update_time(time);
     }
 
@@ -510,8 +546,12 @@ impl Character {
     }
 }
 
-fn get_voxels() -> (u32, Vec<u32>) {
-    let vox_data = dot_vox::load("vox/treehouse.vox").unwrap();
+fn get_voxels(file: std::path::PathBuf) -> Result<Sdf, String> {
+    let bytes = match std::fs::read(file) {
+        Ok(bytes) => bytes,
+        Err(e) => return Err(e.to_string()),
+    };
+    let vox_data = dot_vox::load_bytes(&bytes)?;
     let size = vox_data.models[0].size;
     if size.x != size.y || size.x != size.z || size.y != size.z {
         panic!("Voxel model is not a cube");
@@ -537,7 +577,7 @@ fn get_voxels() -> (u32, Vec<u32>) {
         ] = u32::from_be_bytes([colour[0], colour[1], colour[2], 1]);
     }
 
-    (size as u32, voxels)
+    Ok(Sdf(size as u32, voxels))
 }
 
 // // egui
