@@ -13,7 +13,7 @@ fn main() {
     let (cube_size, voxels) = get_voxels();
 
     env_logger::init();
-    let event_loop = EventLoop::<EguiEvents>::with_user_event();
+    let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     let mut state = pollster::block_on(State::new(&window, &voxels, cube_size));
@@ -23,11 +23,7 @@ fn main() {
         state.egui_platform.handle_event(&event);
         state.input(&event);
         match event {
-            Event::RedrawRequested(_)
-            | Event::UserEvent {
-                0: EguiEvents::RequestRedraw,
-                ..
-            } => {
+            Event::RedrawRequested(_) => {
                 match state.render(&window) {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
@@ -87,18 +83,14 @@ struct State {
     main_bind_group: wgpu::BindGroup,
     input: Input,
     character: Character,
-    previous_frame_time: Option<f32>,
+    previous_frame_time: Option<f64>,
     egui_platform: egui_winit_platform::Platform,
     egui_rpass: egui_wgpu_backend::RenderPass,
 }
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(
-        window: &Window,
-        voxels: &[u32],
-        cube_size: u32,
-    ) -> Self {
+    async fn new(window: &Window, voxels: &[u32], cube_size: u32) -> Self {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::all());
@@ -294,7 +286,7 @@ impl State {
         }
     }
 
-    fn input(&mut self, event: &Event<EguiEvents>) {
+    fn input(&mut self, event: &Event<()>) {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::KeyboardInput {
@@ -366,11 +358,16 @@ impl State {
             bytemuck::cast_slice(&[self.uniforms]),
         );
 
+        let fps = if let Some(previous_frame_time) = self.previous_frame_time {
+            let fps = 1.0 / (time - previous_frame_time);
+            self.previous_frame_time = Some(time);
+            fps
+        } else {
+            self.previous_frame_time = Some(time);
+            0.0
+        };
         egui::Window::new("File editor").show(&self.egui_platform.context(), |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Add widgets");
-                if ui.button("on the same row!").clicked() { /* … */ }
-            });
+            ui.label(format!("FPS: {:.0}", fps));
         });
         // Animation
         // let voxels = get_voxels(128, (time * 60.0) as u32);
@@ -422,15 +419,12 @@ impl State {
         }
 
         // Draw the UI frame.
-        let egui_start = Instant::now();
         self.egui_platform.begin_frame();
 
         // End the UI frame. We could now handle the output and draw the UI with the backend.
         let (_output, paint_commands) = self.egui_platform.end_frame(Some(&window));
         let paint_jobs = self.egui_platform.context().tessellate(paint_commands);
 
-        let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
-        self.previous_frame_time = Some(frame_time);
         // Upload all resources for the GPU.
         let screen_descriptor = egui_wgpu_backend::ScreenDescriptor {
             physical_width: size.width,
@@ -546,22 +540,22 @@ fn get_voxels() -> (u32, Vec<u32>) {
     (size as u32, voxels)
 }
 
-// egui
-/// A custom event type for the winit app.
-enum EguiEvents {
-    RequestRedraw,
-}
+// // egui
+// /// A custom event type for the winit app.
+// enum EguiEvents {
+//     RequestRedraw,
+// }
 
-/// This is the repaint signal type that egui needs for requesting a repaint from another thread.
-/// It sends the custom RequestRedraw event to the winit event loop.
-struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<EguiEvents>>);
+// /// This is the repaint signal type that egui needs for requesting a repaint from another thread.
+// /// It sends the custom RequestRedraw event to the winit event loop.
+// struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<EguiEvents>>);
 
-impl epi::backend::RepaintSignal for ExampleRepaintSignal {
-    fn request_repaint(&self) {
-        self.0
-            .lock()
-            .unwrap()
-            .send_event(EguiEvents::RequestRedraw)
-            .ok();
-    }
-}
+// impl epi::backend::RepaintSignal for ExampleRepaintSignal {
+//     fn request_repaint(&self) {
+//         self.0
+//             .lock()
+//             .unwrap()
+//             .send_event(EguiEvents::RequestRedraw)
+//             .ok();
+//     }
+// }
