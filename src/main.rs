@@ -11,19 +11,24 @@ use winit::{
 fn main() {
     // Load voxels
     let (cube_size, voxels) = get_voxels();
+
     env_logger::init();
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::<EguiEvents>::with_user_event();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     let mut state = pollster::block_on(State::new(&window, &voxels, cube_size));
 
     let now = Instant::now();
     event_loop.run(move |event, _, control_flow| {
+        state.egui_platform.handle_event(&event);
         state.input(&event);
         match event {
-            Event::RedrawRequested(window_id) if window_id == window.id() => {
-                state.update(now.elapsed().as_secs_f32());
-                match state.render() {
+            Event::RedrawRequested(_)
+            | Event::UserEvent {
+                0: EguiEvents::RequestRedraw,
+                ..
+            } => {
+                match state.render(&window) {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
                     Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
@@ -32,6 +37,7 @@ fn main() {
                     // All other errors (Outdated, Timeout) should be resolved by the next frame
                     Err(e) => eprintln!("{:?}", e),
                 }
+                state.update(now.elapsed().as_secs_f64());
             }
             Event::MainEventsCleared => {
                 // RedrawRequested will only trigger once, unless we manually
@@ -81,11 +87,18 @@ struct State {
     main_bind_group: wgpu::BindGroup,
     input: Input,
     character: Character,
+    previous_frame_time: Option<f32>,
+    egui_platform: egui_winit_platform::Platform,
+    egui_rpass: egui_wgpu_backend::RenderPass,
 }
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: &Window, voxels: &[u32], cube_size: u32) -> Self {
+    async fn new(
+        window: &Window,
+        voxels: &[u32],
+        cube_size: u32,
+    ) -> Self {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::all());
@@ -237,6 +250,22 @@ impl State {
         let input = Input::new();
         let character = Character::new();
 
+        // egui
+        let size = window.inner_size();
+        let egui_platform =
+            egui_winit_platform::Platform::new(egui_winit_platform::PlatformDescriptor {
+                physical_width: size.width as u32,
+                physical_height: size.height as u32,
+                scale_factor: window.scale_factor(),
+                font_definitions: egui::FontDefinitions::default(),
+                style: Default::default(),
+            });
+
+        // We use the egui_wgpu_backend crate as the render backend.
+        let egui_rpass = egui_wgpu_backend::RenderPass::new(&device, config.format, 1);
+
+        let previous_frame_time = None;
+
         Self {
             surface,
             device,
@@ -250,6 +279,9 @@ impl State {
             main_bind_group,
             input,
             character,
+            previous_frame_time,
+            egui_platform,
+            egui_rpass,
         }
     }
 
@@ -262,7 +294,7 @@ impl State {
         }
     }
 
-    fn input(&mut self, event: &Event<()>) {
+    fn input(&mut self, event: &Event<EguiEvents>) {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::KeyboardInput {
@@ -300,7 +332,7 @@ impl State {
         }
     }
 
-    fn update(&mut self, time: f32) {
+    fn update(&mut self, time: f64) {
         let input = Vector3::new(
             self.input.right as u32 as f32 - self.input.left as u32 as f32,
             self.input.up as u32 as f32 - self.input.down as u32 as f32,
@@ -334,6 +366,12 @@ impl State {
             bytemuck::cast_slice(&[self.uniforms]),
         );
 
+        egui::Window::new("File editor").show(&self.egui_platform.context(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Add widgets");
+                if ui.button("on the same row!").clicked() { /* … */ }
+            });
+        });
         // Animation
         // let voxels = get_voxels(128, (time * 60.0) as u32);
         // self.queue.write_buffer(
@@ -341,10 +379,12 @@ impl State {
         //     0,
         //     bytemuck::cast_slice(&voxels),
         // );
+        self.egui_platform.update_time(time);
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
+        let size = window.inner_size();
 
         let view = output
             .texture
@@ -356,6 +396,7 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
+        // Draw my app
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -380,7 +421,38 @@ impl State {
             render_pass.draw(0..4, 0..1);
         }
 
-        // submit will accept anything that implements IntoIter
+        // Draw the UI frame.
+        let egui_start = Instant::now();
+        self.egui_platform.begin_frame();
+
+        // End the UI frame. We could now handle the output and draw the UI with the backend.
+        let (_output, paint_commands) = self.egui_platform.end_frame(Some(&window));
+        let paint_jobs = self.egui_platform.context().tessellate(paint_commands);
+
+        let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
+        self.previous_frame_time = Some(frame_time);
+        // Upload all resources for the GPU.
+        let screen_descriptor = egui_wgpu_backend::ScreenDescriptor {
+            physical_width: size.width,
+            physical_height: size.height,
+            scale_factor: window.scale_factor() as f32,
+        };
+        self.egui_rpass.update_texture(
+            &self.device,
+            &self.queue,
+            &self.egui_platform.context().font_image(),
+        );
+        self.egui_rpass
+            .update_user_textures(&self.device, &self.queue);
+        self.egui_rpass
+            .update_buffers(&self.device, &self.queue, &paint_jobs, &screen_descriptor);
+
+        // Record all render passes.
+        self.egui_rpass
+            .execute(&mut encoder, &view, &paint_jobs, &screen_descriptor, None)
+            .unwrap();
+
+        // Submit the command buffer.
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
@@ -472,4 +544,24 @@ fn get_voxels() -> (u32, Vec<u32>) {
     }
 
     (size as u32, voxels)
+}
+
+// egui
+/// A custom event type for the winit app.
+enum EguiEvents {
+    RequestRedraw,
+}
+
+/// This is the repaint signal type that egui needs for requesting a repaint from another thread.
+/// It sends the custom RequestRedraw event to the winit event loop.
+struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<EguiEvents>>);
+
+impl epi::backend::RepaintSignal for ExampleRepaintSignal {
+    fn request_repaint(&self) {
+        self.0
+            .lock()
+            .unwrap()
+            .send_event(EguiEvents::RequestRedraw)
+            .ok();
+    }
 }

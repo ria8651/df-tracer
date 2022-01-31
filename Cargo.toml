@@ -13,3 +13,8 @@ pollster = "0.2"
 env_logger = "0.9"
 bytemuck = { version = "1.7", features = [ "derive" ] }
 dot_vox = "4.1.0"
+egui = "0.16"
+epi = "0.16"
+egui_winit_platform = "0.13"
+egui_wgpu_backend = "0.16"
+egui_demo_lib = "0.16"
