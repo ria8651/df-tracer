@@ -126,15 +126,27 @@ fn sdf_ray(ray: Ray) -> Hit {
     var voxel_pos = start_voxel - step / 2.0;
     var sdf_distance = u32(0);
     loop {
-        if (sdf_distance == u32(0)) {
-            let voxel_data = unpack_u8(look_up_pos(voxel_pos));
-            if (voxel_data.w == u32(0)) {
-                break;
-            }
-            count = count + 1;
-            sdf_distance = voxel_data.w;
+        let voxel_data = unpack_u8(look_up_pos(voxel_pos));
+        if (voxel_data.w == u32(0)) {
+            break;
         }
-        sdf_distance = sdf_distance - u32(1);
+
+        count = count + 1;
+        sdf_distance = voxel_data.w;
+        voxel_pos = voxel_pos + voxel_size * f32(sdf_distance) * ray.dir / 2.0;
+        let start_voxel = ceil(voxel_pos * scale * r_sign) / scale * r_sign;
+        voxel_pos = start_voxel - step / 2.0;
+
+        if (!in_bounds(voxel_pos)) {
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count));
+        }
+
+        let voxel_data_2 = unpack_u8(look_up_pos(voxel_pos));
+        if (voxel_data_2.w == u32(0)) {
+            break;
+        }
+
+        t_max = t_max + (start_voxel - voxel_pos) / ray.dir;
 
         // https://www.shadertoy.com/view/4dX3zl (good old shader toy)
         var mask = t_max.xyz <= min(t_max.yzx, t_max.zxy);
