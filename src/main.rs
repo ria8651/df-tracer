@@ -150,7 +150,9 @@ impl State {
 
         // #region Buffers
         let bytes = include_bytes!("../vox/defualt.vox");
-        let sdf = sdf.unwrap_or(get_voxels(bytes).unwrap());
+        let mut sdf = sdf.unwrap_or(get_voxels(bytes).unwrap());
+        // To make the buffer fit at least a 256x256x256 model.
+        sdf.1.extend(std::iter::repeat(0).take(16777216 - sdf.1.len()));
 
         let uniforms = Uniforms::new(sdf.0);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -395,6 +397,8 @@ impl State {
                                     0,
                                     bytemuck::cast_slice(&sdf.1),
                                 );
+
+                                self.error_string = "".to_string();
                             }
                             Err(error) => {
                                 self.error_string = error;
