@@ -2,8 +2,10 @@ struct Uniforms {
     camera: mat4x4<f32>;
     camera_inverse: mat4x4<f32>;
     dimensions: vec4<f32>;
+    sun_dir: vec4<f32>;
     cube_size: u32;
     ao: bool;
+    steps: bool;
 };
 
 [[group(0), binding(0)]]
@@ -191,7 +193,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
     let hit = sdf_ray(ray);
     if (hit.hit) {
-        let sun_dir = normalize(vec3<f32>(-0.6, -1.0, 0.4));
+        let sun_dir = normalize(u.sun_dir.xyz);
 
         let ambient = 0.3;
         var diffuse = max(dot(hit.normal, -sun_dir), 0.0);
@@ -218,8 +220,11 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
         output_colour = (ambient + diffuse) * hit.colour;
     } else {
-        output_colour =  vec3<f32>(0.5, 0.8, 0.92);
-        // output_colour = vec3<f32>(f32(hit.steps) / 64.0);
+        if (u.steps) {
+            output_colour = vec3<f32>(f32(hit.steps) / 64.0);
+        } else {
+            output_colour =  vec3<f32>(0.2);
+        }
     }
     
     return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);

@@ -418,7 +418,18 @@ impl State {
                     self.error_string.clone(),
                 );
             }
-            ui.checkbox(&mut self.uniforms.ao, "AO: ");
+            
+            ui.horizontal(|ui| {
+                ui.label("x: ");
+                ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[0]).speed(0.1));
+                ui.label("y: ");
+                ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[1]).speed(0.1));
+                ui.label("z: ");
+                ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[2]).speed(0.1));
+            });
+            
+            ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
+            ui.checkbox(&mut self.uniforms.ao, "AO");
         });
 
         self.queue.write_buffer(
@@ -533,9 +544,11 @@ struct Uniforms {
     camera: [[f32; 4]; 4],
     camera_inverse: [[f32; 4]; 4],
     dimensions: [f32; 4],
+    sun_dir: [f32; 4],
     cube_size: u32,
     ao: bool,
-    junk: [u32; 3],
+    steps: bool,
+    junk: [u32; 8],
 }
 
 // For bool
@@ -547,9 +560,11 @@ impl Uniforms {
             camera: [[0.0; 4]; 4],
             camera_inverse: [[0.0; 4]; 4],
             dimensions: [0.0, 0.0, 0.0, 0.0],
+            sun_dir: [-0.6, -1.0, 0.4, 0.0],
             cube_size,
-            ao: false,
-            junk: [0; 3],
+            ao: true,
+            steps: false,
+            junk: [0; 8],
         }
     }
 }
