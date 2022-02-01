@@ -12,7 +12,7 @@ struct Sdf(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
-    let path = std::path::PathBuf::from("vox/defualt.vox");
+    let path = std::path::PathBuf::from("vox/monu9.vox");
 
     let mut sdf = None;
     if let Ok(bytes) = std::fs::read(path) {
@@ -412,10 +412,13 @@ impl State {
                     None => self.error_string = "No file selected".to_string(),
                 }
             }
-            ui.colored_label(
-                egui::color::Color32::from_rgb(255, 22, 22),
-                self.error_string.clone(),
-            );
+            if self.error_string != "" {
+                ui.colored_label(
+                    egui::color::Color32::from_rgb(255, 22, 22),
+                    self.error_string.clone(),
+                );
+            }
+            ui.checkbox(&mut self.uniforms.ao, "AO: ");
         });
 
         self.queue.write_buffer(
@@ -525,14 +528,18 @@ impl Input {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Zeroable)]
 struct Uniforms {
     camera: [[f32; 4]; 4],
     camera_inverse: [[f32; 4]; 4],
     dimensions: [f32; 4],
     cube_size: u32,
+    ao: bool,
     junk: [u32; 3],
 }
+
+// For bool
+unsafe impl bytemuck::Pod for Uniforms {}
 
 impl Uniforms {
     fn new(cube_size: u32) -> Self {
@@ -541,6 +548,7 @@ impl Uniforms {
             camera_inverse: [[0.0; 4]; 4],
             dimensions: [0.0, 0.0, 0.0, 0.0],
             cube_size,
+            ao: false,
             junk: [0; 3],
         }
     }
@@ -577,7 +585,7 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
     let size = size.x as i32;
 
     // Min 1
-    let max_sdf_distance = 16;
+    let max_sdf_distance = 32;
 
     let mut voxels = Vec::new();
     for _ in 0..size {
