@@ -110,7 +110,7 @@ fn sdf_ray(ray: Ray) -> Hit {
         }
     }
 
-    let pos = ray.pos + ray.dir * dist;
+    let pos = ray.pos + ray.dir * (dist + 0.0001);
 
     let r_sign = sign(ray.dir);
     let scale = f32(u.cube_size) / 2.0;
@@ -123,7 +123,7 @@ fn sdf_ray(ray: Ray) -> Hit {
     var t_current = 0.0;
     var count = 0;
     var normal = trunc(pos * 1.0001);
-    var voxel_pos = pos + ray.dir * t_current - normal * 0.001;
+    var voxel_pos = start_voxel - step / 2.0;
     var sdf_distance = u32(0);
     loop {
         if (sdf_distance == u32(0)) {
@@ -136,29 +136,12 @@ fn sdf_ray(ray: Ray) -> Hit {
         }
         sdf_distance = sdf_distance - u32(1);
 
-        if (t_max.x < t_max.y) {
-            if (t_max.x < t_max.z) {
-                t_current = t_max.x;
-                t_max.x = t_max.x + t_step.x;
-                normal = vec3<f32>(-r_sign.x, 0.0, 0.0);
-            } else {
-                t_current = t_max.z;
-                t_max.z = t_max.z + t_step.z;
-                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
-            }
-        } else {
-            if (t_max.y < t_max.z) {
-                t_current = t_max.y;
-                t_max.y = t_max.y + t_step.y;
-                normal = vec3<f32>(0.0, -r_sign.y, 0.0);
-            } else {
-                t_current = t_max.z;
-                t_max.z = t_max.z + t_step.z;
-                normal = vec3<f32>(0.0, 0.0, -r_sign.z);
-            }
-        }
+        // https://www.shadertoy.com/view/4dX3zl (good old shader toy)
+        var mask = t_max.xyz <= min(t_max.yzx, t_max.zxy);
 
-        voxel_pos = pos + ray.dir * t_current - normal * 0.001;
+        voxel_pos = voxel_pos + step * vec3<f32>(mask);
+        t_max = t_max + vec3<f32>(mask) * t_step;
+        normal = vec3<f32>(mask) * -r_sign;
 
         if (!in_bounds(voxel_pos)) {
             return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count));
