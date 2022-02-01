@@ -15,8 +15,10 @@ fn main() {
     let path = std::path::PathBuf::from("vox/treehouse.vox");
 
     let mut sdf = None;
-    if let Ok(output) = get_voxels(path) {
-        sdf = Some(output);
+    if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(output) = get_voxels(&bytes) {
+            sdf = Some(output);
+        }
     }
 
     env_logger::init();
@@ -147,8 +149,8 @@ impl State {
         });
 
         // #region Buffers
-        // 4278190081 is solid red and 16777216 is 256x256x256
-        let sdf = sdf.unwrap_or(Sdf(1, vec![4278190081; 16777216]));
+        let bytes = include_bytes!("../vox/defualt.vox");
+        let sdf = sdf.unwrap_or(get_voxels(bytes).unwrap());
 
         let uniforms = Uniforms::new(sdf.0);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -384,17 +386,22 @@ impl State {
                     .unwrap();
 
                 match path {
-                    Some(path) => match get_voxels(path) {
-                        Ok(sdf) => {
-                            self.uniforms.cube_size = sdf.0;
-                            self.queue.write_buffer(
-                                &self.storage_buffer,
-                                0,
-                                bytemuck::cast_slice(&sdf.1),
-                            );
-                        }
+                    Some(path) => match std::fs::read(path) {
+                        Ok(bytes) => match get_voxels(&bytes) {
+                            Ok(sdf) => {
+                                self.uniforms.cube_size = sdf.0;
+                                self.queue.write_buffer(
+                                    &self.storage_buffer,
+                                    0,
+                                    bytemuck::cast_slice(&sdf.1),
+                                );
+                            }
+                            Err(error) => {
+                                self.error_string = error;
+                            }
+                        },
                         Err(error) => {
-                            self.error_string = error;
+                            self.error_string = error.to_string();
                         }
                     },
                     None => self.error_string = "No file selected".to_string(),
@@ -546,15 +553,11 @@ impl Character {
     }
 }
 
-fn get_voxels(file: std::path::PathBuf) -> Result<Sdf, String> {
-    let bytes = match std::fs::read(file) {
-        Ok(bytes) => bytes,
-        Err(e) => return Err(e.to_string()),
-    };
-    let vox_data = dot_vox::load_bytes(&bytes)?;
+fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
+    let vox_data = dot_vox::load_bytes(file)?;
     let size = vox_data.models[0].size;
     if size.x != size.y || size.x != size.z || size.y != size.z {
-        panic!("Voxel model is not a cube");
+        return Err("Voxel model is not a cube!".to_string());
     }
 
     let size = size.x as usize;
@@ -571,7 +574,8 @@ fn get_voxels(file: std::path::PathBuf) -> Result<Sdf, String> {
     for voxel in &vox_data.models[0].voxels {
         let colour = vox_data.palette[voxel.i as usize].to_le_bytes();
         voxels[
-            voxel.x as usize * size * size + // x
+            // Magica voxel is flipped for some reason idk
+            (size - 1 - voxel.x as usize) * size * size + // x
             voxel.z as usize * size +        // z
             voxel.y as usize                 // y
         ] = u32::from_be_bytes([colour[0], colour[1], colour[2], 1]);
@@ -579,23 +583,3 @@ fn get_voxels(file: std::path::PathBuf) -> Result<Sdf, String> {
 
     Ok(Sdf(size as u32, voxels))
 }
-
-// // egui
-// /// A custom event type for the winit app.
-// enum EguiEvents {
-//     RequestRedraw,
-// }
-
-// /// This is the repaint signal type that egui needs for requesting a repaint from another thread.
-// /// It sends the custom RequestRedraw event to the winit event loop.
-// struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<EguiEvents>>);
-
-// impl epi::backend::RepaintSignal for ExampleRepaintSignal {
-//     fn request_repaint(&self) {
-//         self.0
-//             .lock()
-//             .unwrap()
-//             .send_event(EguiEvents::RequestRedraw)
-//             .ok();
-//     }
-// }

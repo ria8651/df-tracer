@@ -95,6 +95,7 @@ struct Hit {
     pos: vec3<f32>;
     colour: vec3<f32>;
     normal: vec3<f32>;
+    steps: u32;
 };
 
 fn sdf_ray(ray: Ray) -> Hit {
@@ -102,7 +103,7 @@ fn sdf_ray(ray: Ray) -> Hit {
     if (!in_bounds(ray.pos)) {
         dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
         if (dist == 0.0) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0), u32(0));
         }
     }
 
@@ -151,12 +152,13 @@ fn sdf_ray(ray: Ray) -> Hit {
         voxel_pos = pos + ray.dir * t_current - normal * 0.001;
 
         if (!in_bounds(voxel_pos)) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0));
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count));
         }
 
         count = count + 1;
-        if (count > 500) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0));
+        // worst case senario for 256x256x256
+        if (count > 768) {
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0), u32(count));
         }
     }
 
@@ -167,7 +169,7 @@ fn sdf_ray(ray: Ray) -> Hit {
         f32(voxel_data.z)
     ) / 255.0;
 
-    return Hit(true, voxel_pos, voxel_colour, normal);
+    return Hit(true, voxel_pos, voxel_colour, normal, u32(count));
 }
 
 [[stage(fragment)]]
@@ -200,9 +202,8 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
         output_colour = (ambient + diffuse) * hit.colour;
     } else {
-        discard;
-        // output_colour = vec3<f32>(0.5, 0.8, 0.92);
+        output_colour = vec3<f32>(f32(hit.steps) / 512.0);
     }
     
-    return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 1.0);
+    return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);
 }
