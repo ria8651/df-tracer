@@ -121,11 +121,17 @@ fn sdf_ray(ray: Ray) -> Hit {
     var count = 0;
     var normal = trunc(pos * 1.0001);
     var voxel_pos = pos + ray.dir * t_current - normal * 0.001;
+    var sdf_distance = u32(0);
     loop {
-        let voxel_data = unpack_u8(look_up_pos(voxel_pos));
-        if (voxel_data.w != u32(0)) {
-            break;
+        if (sdf_distance == u32(0)) {
+            let voxel_data = unpack_u8(look_up_pos(voxel_pos));
+            if (voxel_data.w == u32(0)) {
+                break;
+            }
+            count = count + 1;
+            sdf_distance = voxel_data.w;
         }
+        sdf_distance = sdf_distance - u32(1);
 
         if (t_max.x < t_max.y) {
             if (t_max.x < t_max.z) {
@@ -155,9 +161,8 @@ fn sdf_ray(ray: Ray) -> Hit {
             return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count));
         }
 
-        count = count + 1;
         // worst case senario for 256x256x256
-        if (count > 768) {
+        if (count > 500) {
             return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0), u32(count));
         }
     }
@@ -202,7 +207,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
         output_colour = (ambient + diffuse) * hit.colour;
     } else {
-        output_colour = vec3<f32>(f32(hit.steps) / 512.0);
+        output_colour = vec3<f32>(f32(hit.steps) / 64.0);
     }
     
     return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);

@@ -8,11 +8,11 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-struct Sdf(u32, Vec<u32>);
+struct Sdf(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
-    let path = std::path::PathBuf::from("vox/treehouse.vox");
+    let path = std::path::PathBuf::from("vox/defualt.vox");
 
     let mut sdf = None;
     if let Ok(bytes) = std::fs::read(path) {
@@ -152,7 +152,8 @@ impl State {
         let bytes = include_bytes!("../vox/defualt.vox");
         let mut sdf = sdf.unwrap_or(get_voxels(bytes).unwrap());
         // To make the buffer fit at least a 256x256x256 model.
-        sdf.1.extend(std::iter::repeat(0).take(16777216 - sdf.1.len()));
+        sdf.1
+            .extend(std::iter::repeat(0).take(67108864 - sdf.1.len()));
 
         let uniforms = Uniforms::new(sdf.0);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -557,6 +558,15 @@ impl Character {
     }
 }
 
+static ORTH: [Vector3<i32>; 6] = [
+    Vector3::new(1, 0, 0),
+    Vector3::new(-1, 0, 0),
+    Vector3::new(0, 1, 0),
+    Vector3::new(0, -1, 0),
+    Vector3::new(0, 0, 1),
+    Vector3::new(0, 0, -1),
+];
+
 fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
     let vox_data = dot_vox::load_bytes(file)?;
     let size = vox_data.models[0].size;
@@ -564,25 +574,54 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
         return Err("Voxel model is not a cube!".to_string());
     }
 
-    let size = size.x as usize;
+    let size = size.x as i32;
+
+    // Min 1
+    let max_sdf_distance = 16;
 
     let mut voxels = Vec::new();
     for _ in 0..size {
         for _ in 0..size {
             for _ in 0..size {
-                voxels.push(u32::from_be_bytes([0, 0, 0, 0]));
+                voxels.extend([max_sdf_distance, 0, 0, 0]);
             }
         }
     }
 
+    fn get_index(pos: Vector3<i32>, size: i32) -> Option<usize> {
+        if pos.x >= size || pos.y >= size || pos.z >= size || pos.x < 0 || pos.y < 0 || pos.z < 0 {
+            return None;
+        }
+
+        Some(
+            4 * pos.x as usize * size as usize * size as usize + // x
+            4 * pos.z as usize * size as usize +                 // z
+            4 * pos.y as usize, // y
+        )
+    }
+
     for voxel in &vox_data.models[0].voxels {
         let colour = vox_data.palette[voxel.i as usize].to_le_bytes();
-        voxels[
-            // Magica voxel is flipped for some reason idk
-            (size - 1 - voxel.x as usize) * size * size + // x
-            voxel.z as usize * size +        // z
-            voxel.y as usize                 // y
-        ] = u32::from_be_bytes([colour[0], colour[1], colour[2], 1]);
+        // Magica voxel is flipped for some reason idk
+        let pos = Vector3::new(size - voxel.x as i32 - 1, voxel.y as i32, voxel.z as i32);
+        let index = get_index(pos, size).unwrap();
+        voxels[index] = 0;
+        voxels[index + 1] = colour[2];
+        voxels[index + 2] = colour[1];
+        voxels[index + 3] = colour[0];
+
+        let mut stack: Vec<(u8, Vector3<i32>)> = Vec::new();
+        stack.push((0, pos));
+        while let Some((sdf_distance, pos)) = stack.pop() {
+            for dir in ORTH {
+                if let Some(index) = get_index(pos + dir, size) {
+                    if voxels[index] > sdf_distance + 1 && voxels[index] <= max_sdf_distance {
+                        voxels[index] = sdf_distance + 1;
+                        stack.push((sdf_distance + 1, pos + dir));
+                    }
+                }
+            }
+        }
     }
 
     Ok(Sdf(size as u32, voxels))
