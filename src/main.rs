@@ -174,41 +174,6 @@ impl State {
         //         | wgpu::BufferUsages::COPY_SRC,
         // });
 
-        let texture_size = wgpu::Extent3d {
-            width: sdf.0,
-            height: sdf.0,
-            depth_or_array_layers: sdf.0,
-        };
-        let df_texture = device.create_texture(&wgpu::TextureDescriptor {
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D3,
-            format: wgpu::TextureFormat::Rgba8Unorm, //Rgba8Uint
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            label: None,
-        });
-
-        queue.write_texture(
-            // Tells wgpu where to copy the pixel data
-            wgpu::ImageCopyTexture {
-                texture: &df_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            // The actual pixel data
-            &sdf.1,
-            // The layout of the texture
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * sdf.0),
-                rows_per_image: std::num::NonZeroU32::new(sdf.0),
-            },
-            texture_size,
-        );
-
-        let df_texture_view = df_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let df_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -262,28 +227,14 @@ impl State {
                 label: Some("main_bind_group_layout"),
             });
 
-        let main_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &main_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&df_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&df_sampler),
-                },
-                // wgpu::BindGroupEntry {
-                //     binding: 3,
-                //     resource: storage_buffer.as_entire_binding(),
-                // },
-            ],
-            label: Some("uniform_bind_group"),
-        });
+        let (df_texture, df_texture_view, main_bind_group) = create_df_texture(
+            &sdf,
+            &device,
+            &queue,
+            &main_bind_group_layout,
+            &uniform_buffer,
+            &df_sampler,
+        );
         // #endregion
 
         let render_pipeline_layout =
@@ -471,66 +422,19 @@ impl State {
                             Ok(sdf) => {
                                 self.uniforms.cube_size = sdf.0;
 
-                                let texture_size = wgpu::Extent3d {
-                                    width: sdf.0,
-                                    height: sdf.0,
-                                    depth_or_array_layers: sdf.0,
-                                };
-                                self.df_texture =
-                                    self.device.create_texture(&wgpu::TextureDescriptor {
-                                        size: texture_size,
-                                        mip_level_count: 1,
-                                        sample_count: 1,
-                                        dimension: wgpu::TextureDimension::D3,
-                                        format: wgpu::TextureFormat::Rgba8Unorm, //Rgba8Uint
-                                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                                            | wgpu::TextureUsages::COPY_DST,
-                                        label: None,
-                                    });
-                                self.df_texture_view = self.df_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                                let (df_texture, df_texture_view, main_bind_group) =
+                                    create_df_texture(
+                                        &sdf,
+                                        &self.device,
+                                        &self.queue,
+                                        &self.main_bind_group_layout,
+                                        &self.uniform_buffer,
+                                        &self.df_sampler,
+                                    );
 
-                                self.queue.write_texture(
-                                    // Tells wgpu where to copy the pixel data
-                                    wgpu::ImageCopyTexture {
-                                        texture: &self.df_texture,
-                                        mip_level: 0,
-                                        origin: wgpu::Origin3d::ZERO,
-                                        aspect: wgpu::TextureAspect::All,
-                                    },
-                                    // The actual pixel data
-                                    &sdf.1,
-                                    // The layout of the texture
-                                    wgpu::ImageDataLayout {
-                                        offset: 0,
-                                        bytes_per_row: std::num::NonZeroU32::new(4 * sdf.0),
-                                        rows_per_image: std::num::NonZeroU32::new(sdf.0),
-                                    },
-                                    texture_size,
-                                );
-
-                                self.main_bind_group =
-                                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                                        layout: &self.main_bind_group_layout,
-                                        entries: &[
-                                            wgpu::BindGroupEntry {
-                                                binding: 0,
-                                                resource: self.uniform_buffer.as_entire_binding(),
-                                            },
-                                            wgpu::BindGroupEntry {
-                                                binding: 1,
-                                                resource: wgpu::BindingResource::TextureView(
-                                                    &self.df_texture_view,
-                                                ),
-                                            },
-                                            wgpu::BindGroupEntry {
-                                                binding: 2,
-                                                resource: wgpu::BindingResource::Sampler(
-                                                    &self.df_sampler,
-                                                ),
-                                            },
-                                        ],
-                                        label: Some("uniform_bind_group"),
-                                    });
+                                self.df_texture = df_texture;
+                                self.df_texture_view = df_texture_view;
+                                self.main_bind_group = main_bind_group;
 
                                 self.error_string = "".to_string();
                             }
@@ -733,7 +637,7 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
 
     let size = size.x as i32;
 
-    // Min 3
+    // Min 4
     let max_sdf_distance = 32;
 
     let mut voxels = Vec::new();
@@ -783,4 +687,73 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
     }
 
     Ok(Sdf(size as u32, voxels))
+}
+
+fn create_df_texture(
+    sdf: &Sdf,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    main_bind_group_layout: &wgpu::BindGroupLayout,
+    uniform_buffer: &wgpu::Buffer,
+    df_sampler: &wgpu::Sampler,
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
+    let texture_size = wgpu::Extent3d {
+        width: sdf.0,
+        height: sdf.0,
+        depth_or_array_layers: sdf.0,
+    };
+    let df_texture = device.create_texture(&wgpu::TextureDescriptor {
+        size: texture_size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D3,
+        format: wgpu::TextureFormat::Rgba8Unorm, //Rgba8Uint
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        label: None,
+    });
+    let df_texture_view = df_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    queue.write_texture(
+        // Tells wgpu where to copy the pixel data
+        wgpu::ImageCopyTexture {
+            texture: &df_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        // The actual pixel data
+        &sdf.1,
+        // The layout of the texture
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: std::num::NonZeroU32::new(4 * sdf.0),
+            rows_per_image: std::num::NonZeroU32::new(sdf.0),
+        },
+        texture_size,
+    );
+
+    let main_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: main_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&df_texture_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&df_sampler),
+            },
+            // wgpu::BindGroupEntry {
+            //     binding: 3,
+            //     resource: storage_buffer.as_entire_binding(),
+            // },
+        ],
+        label: Some("uniform_bind_group"),
+    });
+
+    (df_texture, df_texture_view, main_bind_group)
 }

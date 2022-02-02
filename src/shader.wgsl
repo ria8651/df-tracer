@@ -17,9 +17,9 @@ struct Data {
 };
 
 [[group(0), binding(1)]]
-var t_diffuse: texture_3d<f32>;
+var df_texture: texture_3d<f32>;
 [[group(0), binding(2)]]
-var s_diffuse: sampler;
+var nearest_sampler: sampler;
 
 [[group(0), binding(1)]]
 var<storage, read_write> d: Data;
@@ -80,7 +80,7 @@ struct FSIn {
 
 fn look_up_pos(pos: vec3<f32>) -> vec4<f32> {
     let pos = vec3<f32>(pos * 0.5 + 0.5);
-    return textureSample(t_diffuse, s_diffuse, pos);
+    return textureSample(df_texture, nearest_sampler, pos);
 }
 
 fn unpack_u8(p: u32) -> vec4<u32> {
@@ -218,7 +218,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
         }
     }
 
-    // output_colour = vec3<f32>(textureSample(t_diffuse, s_diffuse, vec3<f32>(clip_space * 0.5 + 0.5, 0.5)).rgb);
+    // output_colour = vec3<f32>(textureSample(df_texture, nearest_sampler, vec3<f32>(clip_space * 0.5 + 0.5, 0.5)).rgb);
     
     return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);
 }
