@@ -4,6 +4,7 @@ struct Uniforms {
     dimensions: vec4<f32>;
     sun_dir: vec4<f32>;
     cube_size: u32;
+    soft_shadows: bool;
     ao: bool;
     steps: bool;
 };
@@ -99,6 +100,7 @@ struct Hit {
     colour: vec3<f32>;
     normal: vec3<f32>;
     steps: u32;
+    closest_ratio: f32;
 };
 
 fn sdf_ray(ray: Ray) -> Hit {
@@ -106,7 +108,7 @@ fn sdf_ray(ray: Ray) -> Hit {
     if (!in_bounds(ray.pos)) {
         dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
         if (dist == 0.0) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0), u32(0));
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0), u32(0), 0.0);
         }
     }
 
@@ -124,16 +126,17 @@ fn sdf_ray(ray: Ray) -> Hit {
     var count = 0;
     var normal = trunc(pos * 1.0001);
     var voxel_pos = start_voxel - step / 2.0;
+    var closest_ratio = 1000.0;
     loop {
         let voxel_data = unpack_u8(look_up_pos(voxel_pos));
         if (voxel_data.w == u32(0)) {
             break;
         }
-        let sdf_distance = voxel_data.w;
 
-        if (sdf_distance > u32(6)) {
+        let sdf_distance = voxel_data.w;
+        if (sdf_distance > u32(3)) {
             // https://www.desmos.com/calculator/rl7xhy6cj9
-            voxel_pos = voxel_pos + voxel_size * (0.577350269 * f32(sdf_distance) - 1.732050807) * ray.dir;
+            voxel_pos = voxel_pos + voxel_size * (0.54 * f32(sdf_distance) - 1.73) * ray.dir;
         } else {
             let start_voxel = ceil(voxel_pos * scale * r_sign) / scale * r_sign;
             voxel_pos = start_voxel - step / 2.0;
@@ -148,14 +151,17 @@ fn sdf_ray(ray: Ray) -> Hit {
             voxel_pos = pos + ray.dir * t_current - normal * 0.001;
         }
 
+        let new_closest_ratio = f32(sdf_distance) / length(voxel_pos - ray.pos);
+        closest_ratio = min(closest_ratio, new_closest_ratio);
+
         if (!in_bounds(voxel_pos)) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count));
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count), closest_ratio);
         }
 
         count = count + 1;
         // worst case senario for 256x256x256
         if (count > 500) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0), u32(count));
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0), u32(count), closest_ratio);
         }
     }
 
@@ -166,7 +172,7 @@ fn sdf_ray(ray: Ray) -> Hit {
         f32(voxel_data.z)
     ) / 255.0;
 
-    return Hit(true, voxel_pos, voxel_colour, normal, u32(count));
+    return Hit(true, voxel_pos, voxel_colour, normal, u32(count), closest_ratio);
 }
 
 [[stage(fragment)]]
@@ -201,9 +207,8 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
         if (shadow_hit.hit) {
             diffuse = 0.0;
         } else {
-            if (u.ao) {
-                let soft = 1.0 - f32(shadow_hit.steps) / 32.0;
-                diffuse = diffuse * clamp(soft, 0.0, 1.0);
+            if (u.soft_shadows) {
+                diffuse = diffuse * clamp(shadow_hit.closest_ratio / 10.0, 0.0, 1.0);
             }
         }
 

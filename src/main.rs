@@ -428,8 +428,9 @@ impl State {
                 ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[2]).speed(0.1));
             });
             
-            ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
+            ui.checkbox(&mut self.uniforms.soft_shadows, "Soft Shadows");
             ui.checkbox(&mut self.uniforms.ao, "AO");
+            ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
         });
 
         self.queue.write_buffer(
@@ -546,6 +547,7 @@ struct Uniforms {
     dimensions: [f32; 4],
     sun_dir: [f32; 4],
     cube_size: u32,
+    soft_shadows: bool,
     ao: bool,
     steps: bool,
     junk: [u32; 8],
@@ -562,6 +564,7 @@ impl Uniforms {
             dimensions: [0.0, 0.0, 0.0, 0.0],
             sun_dir: [-0.6, -1.0, 0.4, 0.0],
             cube_size,
+            soft_shadows: false,
             ao: true,
             steps: false,
             junk: [0; 8],
