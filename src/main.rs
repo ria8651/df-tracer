@@ -12,7 +12,7 @@ struct Sdf(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
-    let path = std::path::PathBuf::from("vox/monu9.vox");
+    let path = std::path::PathBuf::from("vox/treehouse.vox");
 
     let mut sdf = None;
     if let Ok(bytes) = std::fs::read(path) {
@@ -88,7 +88,11 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     uniforms: Uniforms,
     uniform_buffer: wgpu::Buffer,
-    storage_buffer: wgpu::Buffer,
+    df_texture: wgpu::Texture,
+    df_texture_view: wgpu::TextureView,
+    df_sampler: wgpu::Sampler,
+    // storage_buffer: wgpu::Buffer,
+    main_bind_group_layout: wgpu::BindGroupLayout,
     main_bind_group: wgpu::BindGroup,
     input: Input,
     character: Character,
@@ -153,7 +157,7 @@ impl State {
         let mut sdf = sdf.unwrap_or(get_voxels(bytes).unwrap());
         // To make the buffer fit at least a 256x256x256 model.
         sdf.1
-            .extend(std::iter::repeat(0).take(67108864 - sdf.1.len()));
+            .extend(std::iter::repeat(0).take(4 * 67108864 - sdf.1.len()));
 
         let uniforms = Uniforms::new(sdf.0);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -162,12 +166,57 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("SDF Buffer"),
-            contents: bytemuck::cast_slice(&sdf.1),
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
+        // let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("SDF Buffer"),
+        //     contents: bytemuck::cast_slice(&sdf.1),
+        //     usage: wgpu::BufferUsages::STORAGE
+        //         | wgpu::BufferUsages::COPY_DST
+        //         | wgpu::BufferUsages::COPY_SRC,
+        // });
+
+        let texture_size = wgpu::Extent3d {
+            width: sdf.0,
+            height: sdf.0,
+            depth_or_array_layers: sdf.0,
+        };
+        let df_texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rgba8Unorm, //Rgba8Uint
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            label: None,
+        });
+
+        queue.write_texture(
+            // Tells wgpu where to copy the pixel data
+            wgpu::ImageCopyTexture {
+                texture: &df_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            // The actual pixel data
+            &sdf.1,
+            // The layout of the texture
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(4 * sdf.0),
+                rows_per_image: std::num::NonZeroU32::new(sdf.0),
+            },
+            texture_size,
+        );
+
+        let df_texture_view = df_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let df_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
         });
 
         let main_bind_group_layout =
@@ -186,13 +235,29 @@ impl State {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D3,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // wgpu::BindGroupLayoutEntry {
+                    //     binding: 3,
+                    //     visibility: wgpu::ShaderStages::FRAGMENT,
+                    //     ty: wgpu::BindingType::Buffer {
+                    //         ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    //         has_dynamic_offset: false,
+                    //         min_binding_size: None,
+                    //     },
+                    //     count: None,
+                    // },
                 ],
                 label: Some("main_bind_group_layout"),
             });
@@ -206,8 +271,16 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: storage_buffer.as_entire_binding(),
+                    resource: wgpu::BindingResource::TextureView(&df_texture_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&df_sampler),
+                },
+                // wgpu::BindGroupEntry {
+                //     binding: 3,
+                //     resource: storage_buffer.as_entire_binding(),
+                // },
             ],
             label: Some("uniform_bind_group"),
         });
@@ -285,7 +358,11 @@ impl State {
             render_pipeline,
             uniforms,
             uniform_buffer,
-            storage_buffer,
+            df_texture,
+            df_texture_view,
+            df_sampler,
+            // storage_buffer,
+            main_bind_group_layout,
             main_bind_group,
             input,
             character,
@@ -393,11 +470,67 @@ impl State {
                         Ok(bytes) => match get_voxels(&bytes) {
                             Ok(sdf) => {
                                 self.uniforms.cube_size = sdf.0;
-                                self.queue.write_buffer(
-                                    &self.storage_buffer,
-                                    0,
-                                    bytemuck::cast_slice(&sdf.1),
+
+                                let texture_size = wgpu::Extent3d {
+                                    width: sdf.0,
+                                    height: sdf.0,
+                                    depth_or_array_layers: sdf.0,
+                                };
+                                self.df_texture =
+                                    self.device.create_texture(&wgpu::TextureDescriptor {
+                                        size: texture_size,
+                                        mip_level_count: 1,
+                                        sample_count: 1,
+                                        dimension: wgpu::TextureDimension::D3,
+                                        format: wgpu::TextureFormat::Rgba8Unorm, //Rgba8Uint
+                                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                            | wgpu::TextureUsages::COPY_DST,
+                                        label: None,
+                                    });
+                                self.df_texture_view = self.df_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                                self.queue.write_texture(
+                                    // Tells wgpu where to copy the pixel data
+                                    wgpu::ImageCopyTexture {
+                                        texture: &self.df_texture,
+                                        mip_level: 0,
+                                        origin: wgpu::Origin3d::ZERO,
+                                        aspect: wgpu::TextureAspect::All,
+                                    },
+                                    // The actual pixel data
+                                    &sdf.1,
+                                    // The layout of the texture
+                                    wgpu::ImageDataLayout {
+                                        offset: 0,
+                                        bytes_per_row: std::num::NonZeroU32::new(4 * sdf.0),
+                                        rows_per_image: std::num::NonZeroU32::new(sdf.0),
+                                    },
+                                    texture_size,
                                 );
+
+                                self.main_bind_group =
+                                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        layout: &self.main_bind_group_layout,
+                                        entries: &[
+                                            wgpu::BindGroupEntry {
+                                                binding: 0,
+                                                resource: self.uniform_buffer.as_entire_binding(),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 1,
+                                                resource: wgpu::BindingResource::TextureView(
+                                                    &self.df_texture_view,
+                                                ),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 2,
+                                                resource: wgpu::BindingResource::Sampler(
+                                                    &self.df_sampler,
+                                                ),
+                                            },
+                                        ],
+                                        label: Some("uniform_bind_group"),
+                                    });
 
                                 self.error_string = "".to_string();
                             }
@@ -418,7 +551,6 @@ impl State {
                     self.error_string.clone(),
                 );
             }
-            
             ui.horizontal(|ui| {
                 ui.label("x: ");
                 ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[0]).speed(0.1));
@@ -427,7 +559,6 @@ impl State {
                 ui.label("z: ");
                 ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[2]).speed(0.1));
             });
-            
             ui.checkbox(&mut self.uniforms.soft_shadows, "Soft Shadows");
             ui.checkbox(&mut self.uniforms.ao, "AO");
             ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
@@ -602,14 +733,14 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
 
     let size = size.x as i32;
 
-    // Min 1
+    // Min 3
     let max_sdf_distance = 32;
 
     let mut voxels = Vec::new();
     for _ in 0..size {
         for _ in 0..size {
             for _ in 0..size {
-                voxels.extend([max_sdf_distance, 0, 0, 0]);
+                voxels.extend([0, 0, 0, max_sdf_distance]);
             }
         }
     }
@@ -620,9 +751,9 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
         }
 
         Some(
-            4 * pos.x as usize * size as usize * size as usize + // x
-            4 * pos.z as usize * size as usize +                 // z
-            4 * pos.y as usize, // y
+            4 * pos.y as usize * size as usize * size as usize + // y
+            4 * pos.z as usize * size as usize + // z
+            4 * pos.x as usize, // x
         )
     }
 
@@ -631,18 +762,19 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
         // Magica voxel is flipped for some reason idk
         let pos = Vector3::new(size - voxel.x as i32 - 1, voxel.y as i32, voxel.z as i32);
         let index = get_index(pos, size).unwrap();
-        voxels[index] = 0;
-        voxels[index + 1] = colour[2];
-        voxels[index + 2] = colour[1];
-        voxels[index + 3] = colour[0];
+        voxels[index + 0] = colour[0];
+        voxels[index + 1] = colour[1];
+        voxels[index + 2] = colour[2];
+        voxels[index + 3] = 0;
 
         let mut stack: Vec<(u8, Vector3<i32>)> = Vec::new();
         stack.push((0, pos));
         while let Some((sdf_distance, pos)) = stack.pop() {
             for dir in ORTH {
                 if let Some(index) = get_index(pos + dir, size) {
-                    if voxels[index] > sdf_distance + 1 && voxels[index] <= max_sdf_distance {
-                        voxels[index] = sdf_distance + 1;
+                    if voxels[index + 3] > sdf_distance + 1 && voxels[index + 3] <= max_sdf_distance
+                    {
+                        voxels[index + 3] = sdf_distance + 1;
                         stack.push((sdf_distance + 1, pos + dir));
                     }
                 }

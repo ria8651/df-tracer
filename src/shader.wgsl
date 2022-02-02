@@ -17,6 +17,11 @@ struct Data {
 };
 
 [[group(0), binding(1)]]
+var t_diffuse: texture_3d<f32>;
+[[group(0), binding(2)]]
+var s_diffuse: sampler;
+
+[[group(0), binding(1)]]
 var<storage, read_write> d: Data;
 
 [[stage(vertex)]]
@@ -73,11 +78,9 @@ struct FSIn {
     [[builtin(position)]] frag_pos: vec4<f32>;
 };
 
-fn look_up_pos(pos: vec3<f32>) -> u32 {
-    let pos = vec3<u32>((pos * 0.5 + 0.5) * f32(u.cube_size));
-
-    let index = pos.x * u.cube_size * u.cube_size + pos.y * u.cube_size + pos.z;
-    return d.data[index];
+fn look_up_pos(pos: vec3<f32>) -> vec4<f32> {
+    let pos = vec3<f32>(pos * 0.5 + 0.5);
+    return textureSample(t_diffuse, s_diffuse, pos);
 }
 
 fn unpack_u8(p: u32) -> vec4<u32> {
@@ -128,12 +131,12 @@ fn sdf_ray(ray: Ray) -> Hit {
     var voxel_pos = start_voxel - step / 2.0;
     var closest_ratio = 1000.0;
     loop {
-        let voxel_data = unpack_u8(look_up_pos(voxel_pos));
-        if (voxel_data.w == u32(0)) {
+        let voxel_data = look_up_pos(voxel_pos);
+        if (voxel_data.w == 0.0) {
             break;
         }
 
-        let sdf_distance = voxel_data.w;
+        let sdf_distance = u32(voxel_data.w * 255.0);
         if (sdf_distance > u32(3)) {
             // https://www.desmos.com/calculator/rl7xhy6cj9
             voxel_pos = voxel_pos + voxel_size * (0.54 * f32(sdf_distance) - 1.73) * ray.dir;
@@ -142,12 +145,12 @@ fn sdf_ray(ray: Ray) -> Hit {
             voxel_pos = start_voxel - step / 2.0;
 
             t_max = (start_voxel - pos) / ray.dir;
-            let t_current = min(min(t_max.x, t_max.y), t_max.z);
 
             // https://www.shadertoy.com/view/4dX3zl (good old shader toy)
-            var mask = t_max.xyz <= min(t_max.yzx, t_max.zxy);
-            normal = vec3<f32>(mask) * -r_sign;
+            var mask = vec3<f32>(t_max.xyz <= min(t_max.yzx, t_max.zxy));
+            normal = mask * -r_sign;
 
+            let t_current = dot(t_max * mask, vec3<f32>(1.0));
             voxel_pos = pos + ray.dir * t_current - normal * 0.001;
         }
 
@@ -165,13 +168,7 @@ fn sdf_ray(ray: Ray) -> Hit {
         }
     }
 
-    let voxel_data = unpack_u8(look_up_pos(voxel_pos));
-    let voxel_colour = vec3<f32>(
-        f32(voxel_data.x),
-        f32(voxel_data.y),
-        f32(voxel_data.z)
-    ) / 255.0;
-
+    let voxel_colour = look_up_pos(voxel_pos).rgb;
     return Hit(true, voxel_pos, voxel_colour, normal, u32(count), closest_ratio);
 }
 
@@ -220,6 +217,8 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
             output_colour =  vec3<f32>(0.2);
         }
     }
+
+    // output_colour = vec3<f32>(textureSample(t_diffuse, s_diffuse, vec3<f32>(clip_space * 0.5 + 0.5, 0.5)).rgb);
     
     return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);
 }
