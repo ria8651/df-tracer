@@ -12,7 +12,7 @@ struct Sdf(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
-    let path = std::path::PathBuf::from("vox/treehouse.vox");
+    let path = std::path::PathBuf::from("vox/monu9.vox");
 
     let mut sdf = None;
     if let Ok(bytes) = std::fs::read(path) {
@@ -90,7 +90,8 @@ struct State {
     uniform_buffer: wgpu::Buffer,
     df_texture: wgpu::Texture,
     df_texture_view: wgpu::TextureView,
-    df_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
     // storage_buffer: wgpu::Buffer,
     main_bind_group_layout: wgpu::BindGroupLayout,
     main_bind_group: wgpu::BindGroup,
@@ -174,12 +175,21 @@ impl State {
         //         | wgpu::BufferUsages::COPY_SRC,
         // });
 
-        let df_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -213,6 +223,12 @@ impl State {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                     // wgpu::BindGroupLayoutEntry {
                     //     binding: 3,
                     //     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -233,7 +249,8 @@ impl State {
             &queue,
             &main_bind_group_layout,
             &uniform_buffer,
-            &df_sampler,
+            &nearest_sampler,
+            &linear_sampler,
         );
         // #endregion
 
@@ -311,7 +328,8 @@ impl State {
             uniform_buffer,
             df_texture,
             df_texture_view,
-            df_sampler,
+            nearest_sampler,
+            linear_sampler,
             // storage_buffer,
             main_bind_group_layout,
             main_bind_group,
@@ -429,7 +447,8 @@ impl State {
                                         &self.queue,
                                         &self.main_bind_group_layout,
                                         &self.uniform_buffer,
-                                        &self.df_sampler,
+                                        &self.nearest_sampler,
+                                        &self.linear_sampler,
                                     );
 
                                 self.df_texture = df_texture;
@@ -466,6 +485,8 @@ impl State {
             ui.checkbox(&mut self.uniforms.soft_shadows, "Soft Shadows");
             ui.checkbox(&mut self.uniforms.ao, "AO");
             ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
+            ui.add(egui::Slider::new(&mut self.uniforms.misc_value, 0.0..=10.0).text("Misc"));
+            ui.checkbox(&mut self.uniforms.misc_bool, "Misc");
         });
 
         self.queue.write_buffer(
@@ -585,6 +606,8 @@ struct Uniforms {
     soft_shadows: bool,
     ao: bool,
     steps: bool,
+    misc_value: f32,
+    misc_bool: bool,
     junk: [u32; 8],
 }
 
@@ -602,6 +625,8 @@ impl Uniforms {
             soft_shadows: false,
             ao: true,
             steps: false,
+            misc_value: 0.0,
+            misc_bool: false,
             junk: [0; 8],
         }
     }
@@ -695,7 +720,8 @@ fn create_df_texture(
     queue: &wgpu::Queue,
     main_bind_group_layout: &wgpu::BindGroupLayout,
     uniform_buffer: &wgpu::Buffer,
-    df_sampler: &wgpu::Sampler,
+    nearest_sampler: &wgpu::Sampler,
+    linear_sampler: &wgpu::Sampler,
 ) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
     let texture_size = wgpu::Extent3d {
         width: sdf.0,
@@ -745,7 +771,11 @@ fn create_df_texture(
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::Sampler(&df_sampler),
+                resource: wgpu::BindingResource::Sampler(&nearest_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(&linear_sampler),
             },
             // wgpu::BindGroupEntry {
             //     binding: 3,

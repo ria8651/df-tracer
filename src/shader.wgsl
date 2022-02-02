@@ -7,6 +7,8 @@ struct Uniforms {
     soft_shadows: bool;
     ao: bool;
     steps: bool;
+    misc_value: f32;
+    misc_bool: bool;
 };
 
 [[group(0), binding(0)]]
@@ -20,6 +22,8 @@ struct Data {
 var df_texture: texture_3d<f32>;
 [[group(0), binding(2)]]
 var nearest_sampler: sampler;
+[[group(0), binding(3)]]
+var linear_sampler: sampler;
 
 [[group(0), binding(1)]]
 var<storage, read_write> d: Data;
@@ -83,6 +87,11 @@ fn look_up_pos(pos: vec3<f32>) -> vec4<f32> {
     return textureSample(df_texture, nearest_sampler, pos);
 }
 
+fn look_up_pos_linear(pos: vec3<f32>) -> vec4<f32> {
+    let pos = vec3<f32>(pos * 0.5 + 0.5);
+    return textureSample(df_texture, linear_sampler, pos);
+}
+
 fn unpack_u8(p: u32) -> vec4<u32> {
     return vec4<u32>(
         (p >> u32(24)) & u32(255),
@@ -132,11 +141,19 @@ fn sdf_ray(ray: Ray) -> Hit {
     var closest_ratio = 1000.0;
     loop {
         let voxel_data = look_up_pos(voxel_pos);
+        let voxel_data_linear = look_up_pos_linear(voxel_pos);
         if (voxel_data.w == 0.0) {
             break;
         }
 
-        let sdf_distance = u32(voxel_data.w * 255.0);
+
+        var sdf_distance = u32(0);
+        if (u.ao) {
+            sdf_distance = u32(voxel_data.w * 255.0);
+        } else {
+            sdf_distance = u32(voxel_data_linear.w * 255.0);
+        }
+
         if (sdf_distance > u32(3)) {
             // https://www.desmos.com/calculator/rl7xhy6cj9
             voxel_pos = voxel_pos + voxel_size * (0.54 * f32(sdf_distance) - 1.73) * ray.dir;
@@ -154,8 +171,16 @@ fn sdf_ray(ray: Ray) -> Hit {
             voxel_pos = pos + ray.dir * t_current - normal * 0.001;
         }
 
-        let new_closest_ratio = f32(sdf_distance) / length(voxel_pos - ray.pos);
-        closest_ratio = min(closest_ratio, new_closest_ratio);
+        let average = 
+            look_up_pos_linear(voxel_pos + ray.dir * voxel_size).w + 
+            look_up_pos_linear(voxel_pos).w + 
+            look_up_pos_linear(voxel_pos - ray.dir * voxel_size).w;
+        let average = average / 3.0;
+        let dist = length(voxel_pos - ray.pos);
+        if (dist > 0.04) {
+            let new_closest_ratio = (average * 255.0 - 1.0) / dist;
+            closest_ratio = min(closest_ratio, new_closest_ratio);
+        }
 
         if (!in_bounds(voxel_pos)) {
             return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count), closest_ratio);
