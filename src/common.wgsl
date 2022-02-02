@@ -37,3 +37,7 @@ fn rotate(v: vec3<f32>, axis: vec3<f32>, angle: f32) -> vec3<f32> {
 	let m = rotationMatrix(axis, angle);
 	return (m * vec4<f32>(v, 1.0)).xyz;
 }
+
+fn rand(co: vec2<f32>) -> f32{
+    return fract(sin(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}

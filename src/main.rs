@@ -8,16 +8,17 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-struct Sdf(u32, Vec<u8>);
+struct Df(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
     let path = std::path::PathBuf::from("vox/monu9.vox");
+    let max_df_distace = 16.0;
 
-    let mut sdf = None;
+    let mut df = None;
     if let Ok(bytes) = std::fs::read(path) {
-        if let Ok(output) = get_voxels(&bytes) {
-            sdf = Some(output);
+        if let Ok(output) = get_voxels(&bytes, max_df_distace) {
+            df = Some(output);
         }
     }
 
@@ -25,7 +26,7 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(State::new(&window, sdf));
+    let mut state = pollster::block_on(State::new(&window, df, max_df_distace));
 
     let now = Instant::now();
     event_loop.run(move |event, _, control_flow| {
@@ -105,7 +106,7 @@ struct State {
 
 impl State {
     // Creating some of the wgpu types requires async code
-    async fn new(window: &Window, sdf: Option<Sdf>) -> Self {
+    async fn new(window: &Window, df: Option<Df>, max_df_distance: f32) -> Self {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::all());
@@ -155,12 +156,11 @@ impl State {
 
         // #region Buffers
         let bytes = include_bytes!("../vox/defualt.vox");
-        let mut sdf = sdf.unwrap_or(get_voxels(bytes).unwrap());
+        let mut df = df.unwrap_or(get_voxels(bytes, max_df_distance).unwrap());
         // To make the buffer fit at least a 256x256x256 model.
-        sdf.1
-            .extend(std::iter::repeat(0).take(4 * 67108864 - sdf.1.len()));
+        df.1.extend(std::iter::repeat(0).take(4 * 67108864 - df.1.len()));
 
-        let uniforms = Uniforms::new(sdf.0);
+        let uniforms = Uniforms::new(df.0, max_df_distance);
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
@@ -168,8 +168,8 @@ impl State {
         });
 
         // let storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("SDF Buffer"),
-        //     contents: bytemuck::cast_slice(&sdf.1),
+        //     label: Some("DF Buffer"),
+        //     contents: bytemuck::cast_slice(&df.1),
         //     usage: wgpu::BufferUsages::STORAGE
         //         | wgpu::BufferUsages::COPY_DST
         //         | wgpu::BufferUsages::COPY_SRC,
@@ -244,7 +244,7 @@ impl State {
             });
 
         let (df_texture, df_texture_view, main_bind_group) = create_df_texture(
-            &sdf,
+            &df,
             &device,
             &queue,
             &main_bind_group_layout,
@@ -425,8 +425,11 @@ impl State {
             self.previous_frame_time = Some(time);
             0.0
         };
+
         egui::Window::new("Info").show(&self.egui_platform.context(), |ui| {
             ui.label(format!("FPS: {:.0}", fps));
+
+            ui.add(egui::Slider::new(&mut self.uniforms.max_df_distace, 0.0..=32.0).text("Max DF distance"));
             if ui.button("Open File").clicked() {
                 let path = native_dialog::FileDialog::new()
                     .set_location("~/Desktop")
@@ -436,13 +439,13 @@ impl State {
 
                 match path {
                     Some(path) => match std::fs::read(path) {
-                        Ok(bytes) => match get_voxels(&bytes) {
-                            Ok(sdf) => {
-                                self.uniforms.cube_size = sdf.0;
+                        Ok(bytes) => match get_voxels(&bytes, self.uniforms.max_df_distace) {
+                            Ok(df) => {
+                                self.uniforms.cube_size = df.0;
 
                                 let (df_texture, df_texture_view, main_bind_group) =
                                     create_df_texture(
-                                        &sdf,
+                                        &df,
                                         &self.device,
                                         &self.queue,
                                         &self.main_bind_group_layout,
@@ -457,8 +460,9 @@ impl State {
 
                                 self.error_string = "".to_string();
                             }
-                            Err(error) => {
-                                self.error_string = error;
+                            Err(e) => {
+                                self.error_string = e;
+                                return;
                             }
                         },
                         Err(error) => {
@@ -468,12 +472,14 @@ impl State {
                     None => self.error_string = "No file selected".to_string(),
                 }
             }
+
             if self.error_string != "" {
                 ui.colored_label(
                     egui::color::Color32::from_rgb(255, 22, 22),
                     self.error_string.clone(),
                 );
             }
+
             ui.horizontal(|ui| {
                 ui.label("x: ");
                 ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[0]).speed(0.1));
@@ -603,6 +609,7 @@ struct Uniforms {
     dimensions: [f32; 4],
     sun_dir: [f32; 4],
     cube_size: u32,
+    max_df_distace: f32,
     soft_shadows: bool,
     ao: bool,
     steps: bool,
@@ -615,13 +622,14 @@ struct Uniforms {
 unsafe impl bytemuck::Pod for Uniforms {}
 
 impl Uniforms {
-    fn new(cube_size: u32) -> Self {
+    fn new(cube_size: u32, max_df_distace: f32) -> Self {
         Self {
             camera: [[0.0; 4]; 4],
             camera_inverse: [[0.0; 4]; 4],
             dimensions: [0.0, 0.0, 0.0, 0.0],
             sun_dir: [-0.6, -1.0, 0.4, 0.0],
             cube_size,
+            max_df_distace: max_df_distace,
             soft_shadows: false,
             ao: true,
             steps: false,
@@ -644,16 +652,7 @@ impl Character {
     }
 }
 
-static ORTH: [Vector3<i32>; 6] = [
-    Vector3::new(1, 0, 0),
-    Vector3::new(-1, 0, 0),
-    Vector3::new(0, 1, 0),
-    Vector3::new(0, -1, 0),
-    Vector3::new(0, 0, 1),
-    Vector3::new(0, 0, -1),
-];
-
-fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
+fn get_voxels(file: &[u8], max_df_distance: f32) -> Result<Df, String> {
     let vox_data = dot_vox::load_bytes(file)?;
     let size = vox_data.models[0].size;
     if size.x != size.y || size.x != size.z || size.y != size.z {
@@ -662,14 +661,26 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
 
     let size = size.x as i32;
 
-    // Min 4
-    let max_sdf_distance = 32;
-
     let mut voxels = Vec::new();
     for _ in 0..size {
         for _ in 0..size {
             for _ in 0..size {
-                voxels.extend([0, 0, 0, max_sdf_distance]);
+                voxels.extend([0, 0, 0, 255]);
+            }
+        }
+    }
+
+    let mut kernel = Vec::new();
+    for x in -(max_df_distance as i32)..=(max_df_distance as i32) {
+        for y in -(max_df_distance as i32)..=(max_df_distance as i32) {
+            for z in -(max_df_distance as i32)..=(max_df_distance as i32) {
+                let value = (x * x + y * y + z * z) as f32;
+                let value = value.sqrt() / max_df_distance;
+                let value = value.min(1.0) * 255.0;
+
+                let pos = Vector3::new(x, y, z);
+
+                kernel.push((pos, value as u8));
             }
         }
     }
@@ -696,26 +707,20 @@ fn get_voxels(file: &[u8]) -> Result<Sdf, String> {
         voxels[index + 2] = colour[2];
         voxels[index + 3] = 0;
 
-        let mut stack: Vec<(u8, Vector3<i32>)> = Vec::new();
-        stack.push((0, pos));
-        while let Some((sdf_distance, pos)) = stack.pop() {
-            for dir in ORTH {
-                if let Some(index) = get_index(pos + dir, size) {
-                    if voxels[index + 3] > sdf_distance + 1 && voxels[index + 3] <= max_sdf_distance
-                    {
-                        voxels[index + 3] = sdf_distance + 1;
-                        stack.push((sdf_distance + 1, pos + dir));
-                    }
+        for (offset, value) in &kernel {
+            if let Some(index) = get_index(pos + offset, size) {
+                if *value < voxels[index + 3] {
+                    voxels[index + 3] = *value;
                 }
             }
         }
     }
 
-    Ok(Sdf(size as u32, voxels))
+    Ok(Df(size as u32, voxels))
 }
 
 fn create_df_texture(
-    sdf: &Sdf,
+    df: &Df,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     main_bind_group_layout: &wgpu::BindGroupLayout,
@@ -724,9 +729,9 @@ fn create_df_texture(
     linear_sampler: &wgpu::Sampler,
 ) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
     let texture_size = wgpu::Extent3d {
-        width: sdf.0,
-        height: sdf.0,
-        depth_or_array_layers: sdf.0,
+        width: df.0,
+        height: df.0,
+        depth_or_array_layers: df.0,
     };
     let df_texture = device.create_texture(&wgpu::TextureDescriptor {
         size: texture_size,
@@ -748,12 +753,12 @@ fn create_df_texture(
             aspect: wgpu::TextureAspect::All,
         },
         // The actual pixel data
-        &sdf.1,
+        &df.1,
         // The layout of the texture
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: std::num::NonZeroU32::new(4 * sdf.0),
-            rows_per_image: std::num::NonZeroU32::new(sdf.0),
+            bytes_per_row: std::num::NonZeroU32::new(4 * df.0),
+            rows_per_image: std::num::NonZeroU32::new(df.0),
         },
         texture_size,
     );

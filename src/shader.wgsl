@@ -4,6 +4,7 @@ struct Uniforms {
     dimensions: vec4<f32>;
     sun_dir: vec4<f32>;
     cube_size: u32;
+    max_df_distace: f32;
     soft_shadows: bool;
     ao: bool;
     steps: bool;
@@ -146,17 +147,15 @@ fn sdf_ray(ray: Ray) -> Hit {
             break;
         }
 
-
-        var sdf_distance = u32(0);
+        var sdf_distance = 0.0;
         if (u.ao) {
-            sdf_distance = u32(voxel_data.w * 255.0);
+            sdf_distance = voxel_data.w * u.max_df_distace;
         } else {
-            sdf_distance = u32(voxel_data_linear.w * 255.0);
+            sdf_distance = voxel_data_linear.w * u.max_df_distace;
         }
 
-        if (sdf_distance > u32(3)) {
-            // https://www.desmos.com/calculator/rl7xhy6cj9
-            voxel_pos = voxel_pos + voxel_size * (0.54 * f32(sdf_distance) - 1.73) * ray.dir;
+        if (sdf_distance > u.misc_value) {
+            voxel_pos = voxel_pos + voxel_size * (sdf_distance - 1.41) * ray.dir;
         } else {
             let start_voxel = ceil(voxel_pos * scale * r_sign) / scale * r_sign;
             voxel_pos = start_voxel - step / 2.0;
@@ -171,14 +170,14 @@ fn sdf_ray(ray: Ray) -> Hit {
             voxel_pos = pos + ray.dir * t_current - normal * 0.001;
         }
 
-        let average = 
-            look_up_pos_linear(voxel_pos + ray.dir * voxel_size).w + 
-            look_up_pos_linear(voxel_pos).w + 
-            look_up_pos_linear(voxel_pos - ray.dir * voxel_size).w;
-        let average = average / 3.0;
+        // let average = 
+        //     look_up_pos_linear(voxel_pos + ray.dir * voxel_size).w + 
+        //     look_up_pos_linear(voxel_pos).w + 
+        //     look_up_pos_linear(voxel_pos - ray.dir * voxel_size).w;
+        // let average = average / 3.0;
         let dist = length(voxel_pos - ray.pos);
         if (dist > 0.04) {
-            let new_closest_ratio = (average * 255.0 - 1.0) / dist;
+            let new_closest_ratio = (sdf_distance) / dist;
             closest_ratio = min(closest_ratio, new_closest_ratio);
         }
 
