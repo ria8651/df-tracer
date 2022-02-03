@@ -116,7 +116,7 @@ struct Hit {
     closest_ratio: f32;
 };
 
-fn sdf_ray(ray: Ray) -> Hit {
+fn df_ray(ray: Ray, shadow: bool) -> Hit {
     var dist = 0.0;
     if (!in_bounds(ray.pos)) {
         dist = ray_box_dist(ray, vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(1.0, 1.0, 1.0));
@@ -125,20 +125,18 @@ fn sdf_ray(ray: Ray) -> Hit {
         }
     }
 
-    let pos = ray.pos + ray.dir * (dist + 0.0001);
+    let pos = ray.pos + ray.dir * dist;
 
     let r_sign = sign(ray.dir);
     let scale = f32(u.cube_size) / 2.0;
     let voxel_size = 2.0 / f32(u.cube_size);
-    let t_step = voxel_size / (ray.dir * r_sign);
     let step = voxel_size * r_sign;
     let start_voxel = ceil(pos * scale * r_sign) / scale * r_sign;
 
-    var t_max = (start_voxel - pos) / ray.dir;
     var t_current = 0.0;
     var count = 0;
-    var normal = trunc(pos * 1.0001);
-    var voxel_pos = start_voxel - step / 2.0;
+    var normal = vec3<f32>(0.0);
+    var voxel_pos = start_voxel - step * 0.5;
     var closest_ratio = 1000.0;
     loop {
         let voxel_data = look_up_pos(voxel_pos);
@@ -147,38 +145,35 @@ fn sdf_ray(ray: Ray) -> Hit {
             break;
         }
 
-        var sdf_distance = 0.0;
+        var df_distance = 0.0;
         if (u.ao) {
-            sdf_distance = voxel_data.w * u.max_df_distance;
+            df_distance = voxel_data_linear.w * u.max_df_distance;
         } else {
-            sdf_distance = voxel_data_linear.w * u.max_df_distance;
+            df_distance = voxel_data.w * u.max_df_distance;
         }
 
-        if (sdf_distance > 1.7) {
-            voxel_pos = voxel_pos + voxel_size * (sdf_distance - 1.41) * ray.dir;
+        if (df_distance > 1.7) {
+            voxel_pos = voxel_pos + voxel_size * (df_distance - 1.41) * ray.dir;
         } else {
             let start_voxel = ceil(voxel_pos * scale * r_sign) / scale * r_sign;
-            voxel_pos = start_voxel - step / 2.0;
-
-            t_max = (start_voxel - pos) / ray.dir;
+            let t_max = (start_voxel - pos) / ray.dir;
 
             // https://www.shadertoy.com/view/4dX3zl (good old shader toy)
             var mask = vec3<f32>(t_max.xyz <= min(t_max.yzx, t_max.zxy));
             normal = mask * -r_sign;
 
             let t_current = dot(t_max * mask, vec3<f32>(1.0));
-            voxel_pos = pos + ray.dir * t_current - normal * 0.001;
+            voxel_pos = pos + ray.dir * t_current - normal * 0.000001;
         }
 
-        // let average = 
-        //     look_up_pos_linear(voxel_pos + ray.dir * voxel_size).w + 
-        //     look_up_pos_linear(voxel_pos).w + 
-        //     look_up_pos_linear(voxel_pos - ray.dir * voxel_size).w;
-        // let average = average / 3.0;
-        let dist = length(voxel_pos - ray.pos);
-        if (dist > 0.04) {
-            let new_closest_ratio = (sdf_distance) / dist;
-            closest_ratio = min(closest_ratio, new_closest_ratio);
+        if (shadow) {
+            let average = df_distance + look_up_pos_linear(voxel_pos + ray.dir * voxel_size * u.misc_value).w;
+            let average = average / 2.0;
+            let dist = length(voxel_pos - ray.pos);
+            if (dist > 0.01 && df_distance < u.max_df_distance) {
+                let new_closest_ratio = (df_distance - 0.3) / dist;
+                closest_ratio = min(closest_ratio, new_closest_ratio);
+            }
         }
 
         if (!in_bounds(voxel_pos)) {
@@ -207,7 +202,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
     let dir = normalize(dir.xyz / dir.w - pos);
     var ray = Ray(pos.xyz, dir.xyz);
 
-    let hit = sdf_ray(ray);
+    let hit = df_ray(ray, false);
     if (hit.hit) {
         let sun_dir = normalize(u.sun_dir.xyz);
 
@@ -217,19 +212,19 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
         // var v = 0.0;
         // let s = 1;
         // for (var i: i32 = 0; i < s; i = i + 1) {
-        //     let shadow_hit = sdf_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir));
+        //     let shadow_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir));
         //     if (!shadow_hit.hit) {
         //         v = v + 1.0 / f32(s);
         //     }
         // }
         // diffuse = diffuse * v;
 
-        let shadow_hit = sdf_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir));
+        let shadow_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir), true);
         if (shadow_hit.hit) {
             diffuse = 0.0;
         } else {
             if (u.soft_shadows) {
-                diffuse = diffuse * clamp(shadow_hit.closest_ratio / 10.0, 0.0, 1.0);
+                diffuse = diffuse * clamp((shadow_hit.closest_ratio - 1.5) / 10.0, 0.0, 1.0);
             }
         }
 

@@ -494,7 +494,7 @@ impl State {
             ui.checkbox(&mut self.uniforms.soft_shadows, "Soft Shadows");
             ui.checkbox(&mut self.uniforms.ao, "AO");
             ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
-            ui.add(egui::Slider::new(&mut self.uniforms.misc_value, 0.0..=10.0).text("Misc"));
+            ui.add(egui::Slider::new(&mut self.uniforms.misc_value, -1.0..=1.0).text("Misc"));
             ui.checkbox(&mut self.uniforms.misc_bool, "Misc");
         });
 
@@ -633,7 +633,7 @@ impl Uniforms {
             sun_dir: [-0.6, -1.0, 0.4, 0.0],
             cube_size,
             max_df_distace: max_df_distace,
-            soft_shadows: false,
+            soft_shadows: true,
             ao: true,
             steps: false,
             misc_value: 0.0,
