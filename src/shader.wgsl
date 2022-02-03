@@ -4,7 +4,7 @@ struct Uniforms {
     dimensions: vec4<f32>;
     sun_dir: vec4<f32>;
     cube_size: u32;
-    max_df_distace: f32;
+    max_df_distance: f32;
     soft_shadows: bool;
     ao: bool;
     steps: bool;
@@ -149,12 +149,12 @@ fn sdf_ray(ray: Ray) -> Hit {
 
         var sdf_distance = 0.0;
         if (u.ao) {
-            sdf_distance = voxel_data.w * u.max_df_distace;
+            sdf_distance = voxel_data.w * u.max_df_distance;
         } else {
-            sdf_distance = voxel_data_linear.w * u.max_df_distace;
+            sdf_distance = voxel_data_linear.w * u.max_df_distance;
         }
 
-        if (sdf_distance > u.misc_value) {
+        if (sdf_distance > 1.7) {
             voxel_pos = voxel_pos + voxel_size * (sdf_distance - 1.41) * ray.dir;
         } else {
             let start_voxel = ceil(voxel_pos * scale * r_sign) / scale * r_sign;
@@ -242,7 +242,12 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
         }
     }
 
-    // output_colour = vec3<f32>(textureSample(df_texture, nearest_sampler, vec3<f32>(clip_space * 0.5 + 0.5, 0.5)).rgb);
+    // let value = textureSample(df_texture, nearest_sampler, vec3<f32>(clip_space * 0.5 + 0.5, 0.5));
+    // if (u.misc_bool) {
+    //     output_colour = value.ggg;
+    // } else {
+    //     output_colour = value.aaa; // * (255.0 / u.max_df_distance);
+    // }
     
     return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);
 }

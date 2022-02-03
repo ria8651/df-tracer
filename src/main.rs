@@ -12,7 +12,7 @@ struct Df(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
-    let path = std::path::PathBuf::from("vox/monu9.vox");
+    let path = std::path::PathBuf::from("vox/treehouse.vox");
     let max_df_distace = 16.0;
 
     let mut df = None;
@@ -429,7 +429,10 @@ impl State {
         egui::Window::new("Info").show(&self.egui_platform.context(), |ui| {
             ui.label(format!("FPS: {:.0}", fps));
 
-            ui.add(egui::Slider::new(&mut self.uniforms.max_df_distace, 0.0..=32.0).text("Max DF distance"));
+            ui.add(
+                egui::Slider::new(&mut self.uniforms.max_df_distace, 0.0..=32.0)
+                    .text("Max DF distance"),
+            );
             if ui.button("Open File").clicked() {
                 let path = native_dialog::FileDialog::new()
                     .set_location("~/Desktop")
@@ -652,6 +655,15 @@ impl Character {
     }
 }
 
+static ORTH: [Vector3<i32>; 6] = [
+    Vector3::new(1, 0, 0),
+    Vector3::new(-1, 0, 0),
+    Vector3::new(0, 1, 0),
+    Vector3::new(0, -1, 0),
+    Vector3::new(0, 0, 1),
+    Vector3::new(0, 0, -1),
+];
+
 fn get_voxels(file: &[u8], max_df_distance: f32) -> Result<Df, String> {
     let vox_data = dot_vox::load_bytes(file)?;
     let size = vox_data.models[0].size;
@@ -666,21 +678,6 @@ fn get_voxels(file: &[u8], max_df_distance: f32) -> Result<Df, String> {
         for _ in 0..size {
             for _ in 0..size {
                 voxels.extend([0, 0, 0, 255]);
-            }
-        }
-    }
-
-    let mut kernel = Vec::new();
-    for x in -(max_df_distance as i32)..=(max_df_distance as i32) {
-        for y in -(max_df_distance as i32)..=(max_df_distance as i32) {
-            for z in -(max_df_distance as i32)..=(max_df_distance as i32) {
-                let value = (x * x + y * y + z * z) as f32;
-                let value = value.sqrt() / max_df_distance;
-                let value = value.min(1.0) * 255.0;
-
-                let pos = Vector3::new(x, y, z);
-
-                kernel.push((pos, value as u8));
             }
         }
     }
@@ -707,10 +704,21 @@ fn get_voxels(file: &[u8], max_df_distance: f32) -> Result<Df, String> {
         voxels[index + 2] = colour[2];
         voxels[index + 3] = 0;
 
-        for (offset, value) in &kernel {
-            if let Some(index) = get_index(pos + offset, size) {
-                if *value < voxels[index + 3] {
-                    voxels[index + 3] = *value;
+        let mut stack = Vec::new();
+        stack.push((Vector3::zero(), 0));
+        while let Some((offset, df_distance)) = stack.pop() {
+            for dir in ORTH {
+                if let Some(index) = get_index(pos + offset + dir, size) {
+                    let p = offset + dir;
+
+                    let value = (p.x * p.x + p.y * p.y + p.z * p.z) as f32;
+                    let value = value.sqrt() / max_df_distance;
+                    let value = (value.min(1.0) * 255.0) as u8;
+                    
+                    if value < voxels[index + 3] {
+                        voxels[index + 3] = value;
+                        stack.push((p, df_distance + 1));
+                    }
                 }
             }
         }
