@@ -13,11 +13,11 @@ struct Df(u32, Vec<u8>);
 fn main() {
     // Defualt file path that only works on the terminal
     let path = std::path::PathBuf::from("vox/treehouse.vox");
-    let max_df_distace = 16.0;
+    let max_df_distance = 16.0;
 
     let mut df = None;
     if let Ok(bytes) = std::fs::read(path) {
-        if let Ok(output) = get_voxels(&bytes, max_df_distace) {
+        if let Ok(output) = get_voxels(&bytes, max_df_distance) {
             df = Some(output);
         }
     }
@@ -26,7 +26,7 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = pollster::block_on(State::new(&window, df, max_df_distace));
+    let mut state = pollster::block_on(State::new(&window, df, max_df_distance));
 
     let now = Instant::now();
     event_loop.run(move |event, _, control_flow| {
@@ -156,7 +156,10 @@ impl State {
 
         // #region Buffers
         let bytes = include_bytes!("../vox/defualt.vox");
-        let mut df = df.unwrap_or(get_voxels(bytes, max_df_distance).unwrap());
+        let mut df = match df {
+            Some(df) => df,
+            None => get_voxels(bytes, max_df_distance).unwrap(),
+        };
         // To make the buffer fit at least a 256x256x256 model.
         df.1.extend(std::iter::repeat(0).take(4 * 67108864 - df.1.len()));
 
@@ -430,7 +433,7 @@ impl State {
             ui.label(format!("FPS: {:.0}", fps));
 
             ui.add(
-                egui::Slider::new(&mut self.uniforms.max_df_distace, 0.0..=32.0)
+                egui::Slider::new(&mut self.uniforms.max_df_distance, 0.0..=32.0)
                     .text("Max DF distance"),
             );
             if ui.button("Open File").clicked() {
@@ -442,7 +445,7 @@ impl State {
 
                 match path {
                     Some(path) => match std::fs::read(path) {
-                        Ok(bytes) => match get_voxels(&bytes, self.uniforms.max_df_distace) {
+                        Ok(bytes) => match get_voxels(&bytes, self.uniforms.max_df_distance) {
                             Ok(df) => {
                                 self.uniforms.cube_size = df.0;
 
@@ -494,7 +497,7 @@ impl State {
             ui.checkbox(&mut self.uniforms.soft_shadows, "Soft Shadows");
             ui.checkbox(&mut self.uniforms.ao, "AO");
             ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
-            ui.add(egui::Slider::new(&mut self.uniforms.misc_value, -1.0..=1.0).text("Misc"));
+            ui.add(egui::Slider::new(&mut self.uniforms.misc_value, -16.0..=16.0).text("Misc"));
             ui.checkbox(&mut self.uniforms.misc_bool, "Misc");
         });
 
@@ -612,7 +615,7 @@ struct Uniforms {
     dimensions: [f32; 4],
     sun_dir: [f32; 4],
     cube_size: u32,
-    max_df_distace: f32,
+    max_df_distance: f32,
     soft_shadows: bool,
     ao: bool,
     steps: bool,
@@ -625,14 +628,14 @@ struct Uniforms {
 unsafe impl bytemuck::Pod for Uniforms {}
 
 impl Uniforms {
-    fn new(cube_size: u32, max_df_distace: f32) -> Self {
+    fn new(cube_size: u32, max_df_distance: f32) -> Self {
         Self {
             camera: [[0.0; 4]; 4],
             camera_inverse: [[0.0; 4]; 4],
             dimensions: [0.0, 0.0, 0.0, 0.0],
             sun_dir: [-0.6, -1.0, 0.4, 0.0],
             cube_size,
-            max_df_distace: max_df_distace,
+            max_df_distance: max_df_distance,
             soft_shadows: true,
             ao: true,
             steps: false,
@@ -714,7 +717,6 @@ fn get_voxels(file: &[u8], max_df_distance: f32) -> Result<Df, String> {
                     let value = (p.x * p.x + p.y * p.y + p.z * p.z) as f32;
                     let value = value.sqrt() / max_df_distance;
                     let value = (value.min(1.0) * 255.0) as u8;
-                    
                     if value < voxels[index + 3] {
                         voxels[index + 3] = value;
                         stack.push((p, df_distance + 1));

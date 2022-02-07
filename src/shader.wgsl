@@ -130,13 +130,12 @@ fn df_ray(ray: Ray, shadow: bool) -> Hit {
     let r_sign = sign(ray.dir);
     let scale = f32(u.cube_size) / 2.0;
     let voxel_size = 2.0 / f32(u.cube_size);
-    let step = voxel_size * r_sign;
     let start_voxel = ceil(pos * scale * r_sign) / scale * r_sign;
 
     var t_current = 0.0;
     var count = 0;
     var normal = vec3<f32>(0.0);
-    var voxel_pos = start_voxel - step * 0.5;
+    var voxel_pos = start_voxel - ray.dir * 0.001;
     var closest_ratio = 1000.0;
     loop {
         let voxel_data = look_up_pos(voxel_pos);
@@ -169,18 +168,19 @@ fn df_ray(ray: Ray, shadow: bool) -> Hit {
         if (shadow) {
             let average = df_distance + look_up_pos_linear(voxel_pos + ray.dir * voxel_size * u.misc_value).w;
             let average = average / 2.0;
-            let dist = length(voxel_pos - ray.pos);
+            let dist = length(voxel_pos - pos);
             if (dist > 0.01 && df_distance < u.max_df_distance) {
                 let new_closest_ratio = (df_distance - 0.3) / dist;
                 closest_ratio = min(closest_ratio, new_closest_ratio);
             }
         }
 
+        count = count + 1;
+
         if (!in_bounds(voxel_pos)) {
-            return Hit(false, vec3<f32>(0.0), vec3<f32>(0.8), vec3<f32>(0.0), u32(count), closest_ratio);
+            return Hit(false, vec3<f32>(0.0), vec3<f32>(df_distance / u.max_df_distance), vec3<f32>(0.0), u32(count), closest_ratio);
         }
 
-        count = count + 1;
         // worst case senario for 256x256x256
         if (count > 500) {
             return Hit(false, vec3<f32>(0.0), vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0), u32(count), closest_ratio);
@@ -237,11 +237,11 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
         }
     }
 
-    // let value = textureSample(df_texture, nearest_sampler, vec3<f32>(clip_space * 0.5 + 0.5, 0.5));
+    // let value = textureSampleLevel(df_texture, nearest_sampler, vec3<f32>(clip_space * 0.5 + 0.5, 0.5), u.misc_value);
     // if (u.misc_bool) {
-    //     output_colour = value.ggg;
+    //     output_colour = value.aaa;
     // } else {
-    //     output_colour = value.aaa; // * (255.0 / u.max_df_distance);
+    //     output_colour = value.rgb; // * (255.0 / u.max_df_distance);
     // }
     
     return vec4<f32>(pow(clamp(output_colour, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(2.2)), 0.5);
