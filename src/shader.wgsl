@@ -5,6 +5,7 @@ struct Uniforms {
     sun_dir: vec4<f32>;
     cube_size: u32;
     max_df_distance: f32;
+    indirect_samples: u32;
     soft_shadows: bool;
     ao: bool;
     steps: bool;
@@ -208,16 +209,24 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
 
         let ambient = 0.3;
         var diffuse = max(dot(hit.normal, -sun_dir), 0.0);
+        
+        let mask = 1.0 - abs(hit.normal);
+        var indirect_colour = vec3<f32>(0.0);
+        for (var i: i32 = 0; i < i32(u.indirect_samples); i = i + 1) {
+            let dir = vec3<f32>(
+                (rand(clip_space + f32(i) * 11.0 - 1.0) * (mask.x + 1.0) - (1.0 * mask.x)) * pow(hit.normal.x, abs(hit.normal.x)),
+                (rand(clip_space + f32(i) * 11.0 + 2.0) * (mask.y + 1.0) - (1.0 * mask.y)) * pow(hit.normal.y, abs(hit.normal.y)),
+                (rand(clip_space + f32(i) * 11.0 + 5.0) * (mask.z + 1.0) - (1.0 * mask.z)) * pow(hit.normal.z, abs(hit.normal.z))
+            );
+            let indirect_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, dir), false);
+            if (indirect_hit.hit) {
+                indirect_colour = indirect_colour + indirect_hit.colour;
+            }
+        }
 
-        // var v = 0.0;
-        // let s = 1;
-        // for (var i: i32 = 0; i < s; i = i + 1) {
-        //     let shadow_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir));
-        //     if (!shadow_hit.hit) {
-        //         v = v + 1.0 / f32(s);
-        //     }
-        // }
-        // diffuse = diffuse * v;
+        if (u.indirect_samples > u32(0)) {
+            indirect_colour = indirect_colour / f32(u.indirect_samples);
+        }
 
         let shadow_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir), true);
         if (shadow_hit.hit) {
@@ -228,7 +237,7 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
             }
         }
 
-        output_colour = (ambient + diffuse) * hit.colour;
+        output_colour = (ambient + diffuse) * hit.colour + indirect_colour;
     } else {
         if (u.steps) {
             output_colour = vec3<f32>(f32(hit.steps) / 64.0);

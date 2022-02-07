@@ -12,7 +12,7 @@ struct Df(u32, Vec<u8>);
 
 fn main() {
     // Defualt file path that only works on the terminal
-    let path = std::path::PathBuf::from("vox/treehouse.vox");
+    let path = std::path::PathBuf::from("vox/monu9.vox");
     let max_df_distance = 16.0;
 
     let mut df = None;
@@ -494,7 +494,11 @@ impl State {
                 ui.label("z: ");
                 ui.add(egui::DragValue::new(&mut self.uniforms.sun_dir[2]).speed(0.1));
             });
-            ui.checkbox(&mut self.uniforms.soft_shadows, "Soft Shadows");
+            ui.add(
+                egui::Slider::new(&mut self.uniforms.indirect_samples, 0..=16)
+                    .text("Indirect samples"),
+            );
+            ui.checkbox(&mut self.uniforms.soft_shadows, "Soft shadows");
             ui.checkbox(&mut self.uniforms.ao, "AO");
             ui.checkbox(&mut self.uniforms.steps, "Show ray steps");
             ui.add(egui::Slider::new(&mut self.uniforms.misc_value, -16.0..=16.0).text("Misc"));
@@ -532,12 +536,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Load,
                         store: true,
                     },
                 }],
@@ -616,6 +615,7 @@ struct Uniforms {
     sun_dir: [f32; 4],
     cube_size: u32,
     max_df_distance: f32,
+    indirect_samples: u32,
     soft_shadows: bool,
     ao: bool,
     steps: bool,
@@ -636,6 +636,7 @@ impl Uniforms {
             sun_dir: [-0.6, -1.0, 0.4, 0.0],
             cube_size,
             max_df_distance: max_df_distance,
+            indirect_samples: 0,
             soft_shadows: true,
             ao: true,
             steps: false,
