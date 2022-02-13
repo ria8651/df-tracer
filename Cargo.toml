@@ -19,6 +19,12 @@ epi = "0.16"
 egui_winit_platform = "0.13"
 egui_wgpu_backend = "0.16"
 egui_demo_lib = "0.16"
-native-dialog = "0.6"
+console_error_panic_hook = "0.1.7"
+web-sys = "0.3"
 
 [package.metadata.bundle]
+
+[workspace]
+members = [
+    "run-wasm",
+]

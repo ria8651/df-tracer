@@ -86,12 +86,12 @@ struct FSIn {
 
 fn look_up_pos(pos: vec3<f32>) -> vec4<f32> {
     let pos = vec3<f32>(pos * 0.5 + 0.5);
-    return textureSample(df_texture, nearest_sampler, pos);
+    return textureSampleLevel(df_texture, nearest_sampler, pos, 0.0);
 }
 
 fn look_up_pos_linear(pos: vec3<f32>) -> vec4<f32> {
     let pos = vec3<f32>(pos * 0.5 + 0.5);
-    return textureSample(df_texture, linear_sampler, pos);
+    return textureSampleLevel(df_texture, linear_sampler, pos, 0.0);
 }
 
 fn unpack_u8(p: u32) -> vec4<u32> {
@@ -159,7 +159,7 @@ fn df_ray(ray: Ray, shadow: bool) -> Hit {
             let t_max = (start_voxel - pos) / ray.dir;
 
             // https://www.shadertoy.com/view/4dX3zl (good old shader toy)
-            var mask = vec3<f32>(t_max.xyz <= min(t_max.yzx, t_max.zxy));
+            let mask = vec3<f32>(t_max.xyz <= min(t_max.yzx, t_max.zxy));
             normal = mask * -r_sign;
 
             let t_current = dot(t_max * mask, vec3<f32>(1.0));
@@ -228,14 +228,14 @@ fn fs_main(in: FSIn) -> [[location(0)]] vec4<f32> {
             indirect_colour = indirect_colour / f32(u.indirect_samples);
         }
 
-        let shadow_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir), true);
-        if (shadow_hit.hit) {
-            diffuse = 0.0;
-        } else {
-            if (u.soft_shadows) {
-                diffuse = diffuse * clamp((shadow_hit.closest_ratio - 1.5) / 10.0, 0.0, 1.0);
-            }
-        }
+        // let shadow_hit = df_ray(Ray(hit.pos + hit.normal * 0.0156, -sun_dir), true);
+        // if (shadow_hit.hit) {
+        //     diffuse = 0.0;
+        // } else {
+        //     if (u.soft_shadows) {
+        //         diffuse = diffuse * clamp((shadow_hit.closest_ratio - 1.5) / 10.0, 0.0, 1.0);
+        //     }
+        // }
 
         output_colour = (ambient + diffuse) * hit.colour + indirect_colour;
     } else {

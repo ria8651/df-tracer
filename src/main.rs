@@ -1,6 +1,6 @@
 use cgmath::prelude::*;
 use cgmath::{perspective, Deg, Matrix4, Point3, Vector3};
-use std::time::Instant;
+// use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
@@ -11,6 +11,8 @@ use winit::{
 struct Df(u32, Vec<u8>);
 
 fn main() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+
     // Defualt file path that only works on the terminal
     let path = std::path::PathBuf::from("vox/monu9.vox");
     let max_df_distance = 16.0;
@@ -26,9 +28,23 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::WindowExtWebSys;
+
+        let canvas = window.canvas();
+
+        let window = web_sys::window().unwrap();
+        let document = window.document().unwrap();
+        let body = document.body().unwrap();
+
+        body.append_child(&canvas)
+            .expect("Append canvas to HTML body");
+    }
+
     let mut state = pollster::block_on(State::new(&window, df, max_df_distance));
 
-    let now = Instant::now();
+    // let now = Instant::now();
     event_loop.run(move |event, _, control_flow| {
         state.egui_platform.handle_event(&event);
         state.input(&event);
@@ -43,7 +59,7 @@ fn main() {
                     // All other errors (Outdated, Timeout) should be resolved by the next frame
                     Err(e) => eprintln!("{:?}", e),
                 }
-                state.update(now.elapsed().as_secs_f64());
+                state.update(0.0);
             }
             Event::MainEventsCleared => {
                 // RedrawRequested will only trigger once, unless we manually
@@ -436,48 +452,48 @@ impl State {
                 egui::Slider::new(&mut self.uniforms.max_df_distance, 0.0..=32.0)
                     .text("Max DF distance"),
             );
-            if ui.button("Open File").clicked() {
-                let path = native_dialog::FileDialog::new()
-                    .set_location("~/Desktop")
-                    .add_filter("Magica Voxel VOX File", &["vox"])
-                    .show_open_single_file()
-                    .unwrap();
+            // if ui.button("Open File").clicked() {
+            //     let path = native_dialog::FileDialog::new()
+            //         .set_location("~/Desktop")
+            //         .add_filter("Magica Voxel VOX File", &["vox"])
+            //         .show_open_single_file()
+            //         .unwrap();
 
-                match path {
-                    Some(path) => match std::fs::read(path) {
-                        Ok(bytes) => match get_voxels(&bytes, self.uniforms.max_df_distance) {
-                            Ok(df) => {
-                                self.uniforms.cube_size = df.0;
+            //     match path {
+            //         Some(path) => match std::fs::read(path) {
+            //             Ok(bytes) => match get_voxels(&bytes, self.uniforms.max_df_distance) {
+            //                 Ok(df) => {
+            //                     self.uniforms.cube_size = df.0;
 
-                                let (df_texture, df_texture_view, main_bind_group) =
-                                    create_df_texture(
-                                        &df,
-                                        &self.device,
-                                        &self.queue,
-                                        &self.main_bind_group_layout,
-                                        &self.uniform_buffer,
-                                        &self.nearest_sampler,
-                                        &self.linear_sampler,
-                                    );
+            //                     let (df_texture, df_texture_view, main_bind_group) =
+            //                         create_df_texture(
+            //                             &df,
+            //                             &self.device,
+            //                             &self.queue,
+            //                             &self.main_bind_group_layout,
+            //                             &self.uniform_buffer,
+            //                             &self.nearest_sampler,
+            //                             &self.linear_sampler,
+            //                         );
 
-                                self.df_texture = df_texture;
-                                self.df_texture_view = df_texture_view;
-                                self.main_bind_group = main_bind_group;
+            //                     self.df_texture = df_texture;
+            //                     self.df_texture_view = df_texture_view;
+            //                     self.main_bind_group = main_bind_group;
 
-                                self.error_string = "".to_string();
-                            }
-                            Err(e) => {
-                                self.error_string = e;
-                                return;
-                            }
-                        },
-                        Err(error) => {
-                            self.error_string = error.to_string();
-                        }
-                    },
-                    None => self.error_string = "No file selected".to_string(),
-                }
-            }
+            //                     self.error_string = "".to_string();
+            //                 }
+            //                 Err(e) => {
+            //                     self.error_string = e;
+            //                     return;
+            //                 }
+            //             },
+            //             Err(error) => {
+            //                 self.error_string = error.to_string();
+            //             }
+            //         },
+            //         None => self.error_string = "No file selected".to_string(),
+            //     }
+            // }
 
             if self.error_string != "" {
                 ui.colored_label(
